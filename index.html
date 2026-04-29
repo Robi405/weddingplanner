@@ -1,0 +1,489 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  LayoutDashboard, Gift, PiggyBank, CalendarHeart, 
+  LogOut, Menu, X, Plus, Trash2, Edit2, 
+  CheckCircle2, Clock, ExternalLink, Save, Lock, Edit3,
+  UserPlus, UserCircle, Eye, EyeOff
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { 
+  getFirestore, collection, doc, setDoc, getDoc, 
+  onSnapshot, addDoc, deleteDoc, updateDoc, query, orderBy
+} from 'firebase/firestore';
+
+// ============================================================
+// KONFIGURASI PENJUALAN (GANTI UNTUK SETIAP PEMBELI BARU)
+// ============================================================
+const SPREADSHEET_URL = "https://script.google.com/macros/s/AKfycbxxuRJW8RLcCs_oQ_hiJ9RbUblT-srDnjAvXzfRFXqjGKbKD932Rr8g46uH01ogq38-/exec"; 
+const CLIENT_LICENSE_ID = "wedding-planner-client-01"; // Ganti ID ini untuk setiap pembeli berbeda
+// ============================================================
+
+// --- INISIALISASI FIREBASE ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = CLIENT_LICENSE_ID; // Menggunakan License ID sebagai appId
+
+// --- HELPER GLOBAL: SIMPAN KE SPREADSHEET ---
+const kirimKeSpreadsheet = async (tipe, dataObj) => {
+  if (!SPREADSHEET_URL || SPREADSHEET_URL.includes("URL_WEB_APP_ANDA")) {
+    console.warn("URL Spreadsheet belum diatur.");
+    return;
+  }
+  try {
+    await fetch(SPREADSHEET_URL, {
+      method: "POST",
+      mode: "no-cors", 
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ type: tipe, data: dataObj })
+    });
+  } catch (err) {
+    console.error("Gagal mengirim ke spreadsheet:", err);
+  }
+};
+
+const KATEGORI_SESERAHAN = [
+  "Perangkat Alat Sholat", "Make Up & Skin Care", "Peralatan Mandi",
+  "Pakaian Dalam", "Pakaian Luar", "Perhiasan", "Tambahan"
+];
+
+const formatNumberInput = (v) => {
+  if (!v) return '';
+  const s = v.toString().replace(/\D/g, '');
+  return s ? parseInt(s, 10).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '';
+};
+const parseNumberInput = (v) => v ? Number(v.toString().replace(/\./g, '')) : 0;
+
+const navItems = [
+  { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { id: 'seserahan', icon: Gift, label: 'Seserahan' },
+  { id: 'tabungan', icon: PiggyBank, label: 'Tabungan' },
+  { id: 'wo', icon: CalendarHeart, label: 'Vendor WO' },
+  { id: 'pengaturan', icon: UserCircle, label: 'Akun' },
+];
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [activeMenu, setActiveMenu] = useState('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const [isSetupComplete, setIsSetupComplete] = useState(null);
+  const [isLocked, setIsLocked] = useState(true);
+  const [appSettings, setAppSettings] = useState({ username: '', password: '', rencanaAnggaran: 0, namaPasangan: '' });
+  
+  const [seserahan, setSeserahan] = useState([]);
+  const [tabungan, setTabungan] = useState([]);
+  const [woData, setWoData] = useState({ namaWO: '', totalHarga: 0, dpMasuk: 0, status: 'Survey' });
+
+  const [setupUsername, setSetupUsername] = useState('');
+  const [setupPassword, setSetupPassword] = useState('');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [showSetupPassword, setShowSetupPassword] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+
+  useEffect(() => {
+    signInAnonymously(auth).catch(console.error);
+    return onAuthStateChanged(auth, (u) => { setUser(u); setIsAuthReady(true); });
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const userPath = `artifacts/${appId}/users/${user.uid}`;
+    const unsubS = onSnapshot(doc(db, userPath, 'app_data', 'settings'), (d) => {
+      if (d.exists()) { setAppSettings(d.data()); setIsSetupComplete(!!d.data().password); }
+      else { setIsSetupComplete(false); }
+    });
+    const unsubW = onSnapshot(doc(db, userPath, 'app_data', 'wo_booking'), (d) => d.exists() && setWoData(d.data()));
+    const unsubSes = onSnapshot(collection(db, userPath, 'seserahan'), (s) => setSeserahan(s.docs.map(d => ({id: d.id, ...d.data()}))));
+    const unsubTab = onSnapshot(collection(db, userPath, 'tabungan'), (s) => {
+      const d = s.docs.map(doc => ({id: doc.id, ...doc.data()}));
+      setTabungan(d.sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal)));
+    });
+    return () => { unsubS(); unsubW(); unsubSes(); unsubTab(); };
+  }, [user]);
+
+  const handleSetup = async (e) => {
+    e.preventDefault();
+    const data = { username: setupUsername, password: setupPassword, namaPasangan: 'Romeo & Juliet', rencanaAnggaran: 0 };
+    await setDoc(doc(db, `artifacts/${appId}/users/${user.uid}`, 'app_data', 'settings'), data, { merge: true });
+    kirimKeSpreadsheet("Pengaturan", data);
+    setIsLocked(false);
+  };
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if ((!appSettings.username || loginUsername === appSettings.username) && loginPassword === appSettings.password) {
+      setIsLocked(false); setLoginError(''); setLoginPassword(''); setLoginUsername('');
+    } else { setLoginError('Username atau Password salah!'); }
+  };
+
+  const formatRupiah = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
+  const totalTabungan = tabungan.reduce((sum, item) => sum + Number(item.jumlah || 0), 0);
+  const totalSeserahan = seserahan.reduce((sum, item) => sum + Number(item.harga || 0), 0);
+  const totalWO = Number(woData.totalHarga || 0);
+  const dpWO = Number(woData.dpMasuk || 0);
+  const rencanaAnggaran = Number(appSettings.rencanaAnggaran || 0);
+
+  if (!isAuthReady || !user || isSetupComplete === null) return <div className="min-h-screen flex items-center justify-center bg-pink-50 text-pink-400 font-semibold tracking-widest">Mempersiapkan...</div>;
+
+  if (isLocked) {
+    return (
+      <div className="min-h-screen bg-[url('https://images.unsplash.com/photo-1518895949257-7621c3c786d7?q=80&w=2074&auto=format&fit=crop')] bg-cover bg-center flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-rose-950/30 backdrop-blur-md"></div>
+        {!isSetupComplete ? (
+          <div className="relative z-10 w-full max-w-md bg-white/30 backdrop-blur-xl border border-white/40 p-10 rounded-[2.5rem] text-center shadow-2xl animate-in zoom-in duration-500">
+            <h1 className="text-3xl font-serif font-bold text-rose-950 mb-8 tracking-wide uppercase">Setup Akun Pembeli</h1>
+            <p className="text-rose-900/70 mb-6 text-sm">Halaman ini muncul jika lisensi baru diaktifkan.</p>
+            <form onSubmit={handleSetup} className="space-y-4">
+              <input type="text" placeholder="Buat Username Pembeli" required className="w-full bg-white/50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-rose-300 transition-all text-center" value={setupUsername} onChange={e => setSetupUsername(e.target.value)} />
+              <div className="relative">
+                <input type={showSetupPassword ? "text" : "password"} placeholder="Buat Password Pembeli" required className="w-full bg-white/50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-rose-300 transition-all text-center tracking-widest" value={setupPassword} onChange={e => setSetupPassword(e.target.value)} />
+                <button type="button" onClick={() => setShowSetupPassword(!showSetupPassword)} className="absolute right-4 top-4 text-rose-700 opacity-60 hover:opacity-100">{showSetupPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button>
+              </div>
+              <button className="w-full bg-rose-400 hover:bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg transition-all">Aktifkan Lisensi</button>
+            </form>
+          </div>
+        ) : (
+          <div className="relative z-10 w-full max-w-md bg-white/30 backdrop-blur-xl border border-white/40 p-10 rounded-[2.5rem] text-center shadow-2xl animate-in zoom-in duration-500">
+            <h1 className="text-3xl font-serif font-bold text-rose-950 mb-8 tracking-wide uppercase">Wedding Login</h1>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <input type="text" placeholder="Username" required className="w-full bg-white/50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-rose-300 transition-all text-center" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} />
+              <div className="relative">
+                <input type={showLoginPassword ? "text" : "password"} placeholder="Password" required className="w-full bg-white/50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-rose-300 transition-all text-center tracking-widest" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} />
+                <button type="button" onClick={() => setShowLoginPassword(!showLoginPassword)} className="absolute right-4 top-4 text-rose-700 opacity-60 hover:opacity-100">{showLoginPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button>
+              </div>
+              {loginError && <p className="text-rose-700 font-bold bg-white/40 rounded-xl py-2">{loginError}</p>}
+              <button className="w-full bg-rose-400 hover:bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg transition-all">Masuk</button>
+            </form>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const renderContent = () => {
+    const commonProps = { userPath: `artifacts/${appId}/users/${user.uid}`, db, format: formatRupiah };
+    switch (activeMenu) {
+      case 'dashboard': return <Dashboard {...commonProps} totalTabungan={totalTabungan} rencanaAnggaran={rencanaAnggaran} totalAnggaran={totalSeserahan + totalWO} totalSeserahan={totalSeserahan} totalWO={totalWO} dpWO={dpWO} namaPasangan={appSettings.namaPasangan} seserahan={seserahan} woData={woData} />;
+      case 'seserahan': return <Seserahan {...commonProps} data={seserahan} />;
+      case 'tabungan': return <Tabungan {...commonProps} data={tabungan} rencanaAnggaran={rencanaAnggaran} />;
+      case 'wo': return <BookingWO {...commonProps} data={woData} />;
+      case 'pengaturan': return <Pengaturan {...commonProps} settings={appSettings} />;
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[url('https://images.unsplash.com/photo-1518895949257-7621c3c786d7?q=80&w=2074&auto=format&fit=crop')] bg-cover bg-center bg-fixed font-sans">
+      <div className="absolute inset-0 bg-gradient-to-br from-pink-50/80 to-rose-100/70 backdrop-blur-[6px]"></div>
+      
+      {/* HEADER MOBILE */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-pink-100/50 p-4 flex justify-between items-center shadow-sm">
+        <h2 className="text-xl font-bold text-rose-900 font-serif">Wedding Planner</h2>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 bg-white/50 rounded-xl shadow-sm border border-pink-100/60 text-rose-900">
+          {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      </div>
+
+      {/* OVERLAY MENU MOBILE */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-40 bg-pink-50/95 backdrop-blur-3xl pt-24 pb-6 px-6 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+          <nav className="flex-1 space-y-3">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => { setActiveMenu(item.id); setIsMobileMenuOpen(false); }}
+                className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all ${
+                  activeMenu === item.id ? 'bg-pink-200 text-pink-700 shadow-sm border border-pink-300 font-bold' : 'text-stone-700 bg-white/50 border border-white/60'
+                }`}
+              >
+                <item.icon size={24} />
+                <span className="text-lg">{item.label}</span>
+              </button>
+            ))}
+          </nav>
+          <button 
+            onClick={() => { setIsLocked(true); setIsMobileMenuOpen(false); }}
+            className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl text-white bg-rose-400 font-semibold shadow-md"
+          >
+            <LogOut size={24} /> Logout
+          </button>
+        </div>
+      )}
+
+      <div className="relative z-10 flex h-screen p-4 md:p-8 gap-6 overflow-hidden pt-20 md:pt-8">
+        {/* SIDEBAR DESKTOP */}
+        <aside className="hidden md:flex flex-col w-72 bg-white/50 backdrop-blur-2xl border border-pink-100/60 rounded-[2.5rem] p-6 shadow-xl">
+          <div className="mb-10 text-center"><h2 className="text-2xl font-serif font-bold text-rose-900 tracking-tight">Wedding Planner</h2></div>
+          <nav className="flex-1 space-y-2">
+            {navItems.map(i => (
+              <button key={i.id} onClick={() => setActiveMenu(i.id)} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${activeMenu === i.id ? 'bg-pink-200/80 text-pink-700 font-bold shadow-sm' : 'text-stone-600 hover:bg-pink-50'}`}>
+                <i.icon size={20}/> {i.label}
+              </button>
+            ))}
+          </nav>
+          <button onClick={() => setIsLocked(true)} className="flex items-center justify-center gap-2 p-4 text-rose-500 font-bold hover:bg-rose-50 rounded-2xl transition-all"><LogOut size={20}/> Logout</button>
+        </aside>
+
+        {/* AREA KONTEN UTAMA */}
+        <main className="flex-1 bg-white/50 backdrop-blur-2xl rounded-[2.5rem] overflow-y-auto p-6 md:p-10 shadow-inner custom-scrollbar">
+          {renderContent()}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// --- KOMPONEN PENDUKUNG ---
+
+function GlassCard({ children, className = '' }) { 
+  return <div className={`bg-white/60 backdrop-blur-xl border border-pink-100/60 rounded-3xl p-6 shadow-[0_8px_30px_rgb(225,29,72,0.03)] ${className}`}>{children}</div>; 
+}
+
+function Dashboard({ totalTabungan, rencanaAnggaran, totalAnggaran, totalSeserahan, totalWO, dpWO, format, db, userPath, namaPasangan, seserahan, woData }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [name, setName] = useState(namaPasangan || 'Romeo & Juliet');
+  const handleSaveName = async () => {
+    await setDoc(doc(db, userPath, 'app_data', 'settings'), { namaPasangan: name }, { merge: true });
+    kirimKeSpreadsheet("Nama_Pasangan", { Nama: name });
+    setIsEditing(false);
+  };
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col items-center md:items-start text-center md:text-left">
+        <p className="text-pink-500 font-bold tracking-widest text-xs uppercase mb-1">Pernikahan Impian</p>
+        <div className="flex items-center gap-4 mt-2">
+          {isEditing ? (
+            <div className="flex gap-2"><input type="text" value={name} onChange={e => setName(e.target.value)} className="text-2xl md:text-3xl font-serif p-2 rounded-xl bg-white/80 border border-pink-200 outline-none w-full max-w-md"/><button onClick={handleSaveName} className="bg-rose-400 text-white p-3 rounded-xl shadow-md"><Save size={20}/></button></div>
+          ) : (
+            <div className="flex items-center gap-4"><h1 className="text-3xl md:text-6xl font-serif font-bold text-rose-950 leading-tight">{name}</h1><button onClick={() => setIsEditing(true)} className="text-pink-300 hover:text-pink-600 transition-colors"><Edit3 size={24}/></button></div>
+          )}
+        </div>
+      </div>
+      <GlassCard className="bg-gradient-to-br from-pink-400 to-rose-400 text-white border-none shadow-xl">
+        <div className="flex justify-between items-end">
+          <div><p className="text-white/80 text-xs uppercase tracking-wider mb-1">Tabungan Terkumpul</p><h2 className="text-3xl md:text-5xl font-bold">{format(totalTabungan)}</h2></div>
+          <div className="text-right"><p className="text-white/80 text-xs uppercase tracking-wider mb-1">Target Anggaran</p><h3 className="text-xl md:text-2xl font-semibold">{format(rencanaAnggaran)}</h3></div>
+        </div>
+        <div className="mt-6 bg-white/20 p-4 rounded-2xl backdrop-blur-sm border border-white/10">
+          <div className="flex justify-between text-xs mb-2 font-bold tracking-wide"><span>Status Progress</span><span>{((totalTabungan/rencanaAnggaran)*100 || 0).toFixed(1)}%</span></div>
+          <div className="h-2.5 bg-black/10 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-white transition-all duration-1000" style={{width: `${(totalTabungan/rencanaAnggaran)*100}%`}}></div></div>
+        </div>
+      </GlassCard>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <GlassCard className="hover:scale-105 transition-transform"><p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest mb-1">Seserahan</p><p className="text-2xl font-bold text-rose-900">{format(totalSeserahan)}</p></GlassCard>
+        <GlassCard className="hover:scale-105 transition-transform"><p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest mb-1">Vendor WO</p><p className="text-2xl font-bold text-rose-900">{format(totalWO)}</p></GlassCard>
+        <GlassCard className="hover:scale-105 transition-transform"><p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest mb-1">Sisa Pelunasan</p><p className="text-2xl font-bold text-rose-600">{format(totalWO - dpWO)}</p></GlassCard>
+      </div>
+    </div>
+  );
+}
+
+function Seserahan({ userPath, data, format, db }) {
+  const [form, setForm] = useState({ nama: '', harga: '', link: '', kategori: KATEGORI_SESERAHAN[0], status: 'On Progress' });
+  const [isAdding, setIsAdding] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const finalData = { ...form, harga: parseNumberInput(form.harga) };
+    await addDoc(collection(db, userPath, 'seserahan'), finalData);
+    kirimKeSpreadsheet("Seserahan", finalData);
+    setForm({ nama: '', harga: '', link: '', kategori: KATEGORI_SESERAHAN[0], status: 'On Progress' });
+    setIsAdding(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"><h1 className="text-3xl font-serif font-bold text-rose-900">Seserahan</h1><button onClick={() => setIsAdding(!isAdding)} className="bg-rose-400 text-white px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-md hover:bg-rose-500 transition-all font-bold">{isAdding ? <X size={18}/> : <Plus size={18}/>} Tambah Barang</button></div>
+      
+      {isAdding && (
+        <GlassCard className="animate-in slide-in-from-top-4 border-pink-200">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {/* Kategori Paling Atas */}
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-rose-400 ml-2">Pilih Kategori</label>
+              <select 
+                className="w-full p-4 rounded-xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all font-medium text-stone-700" 
+                value={form.kategori} 
+                onChange={e => setForm({...form, kategori: e.target.value})}
+              >
+                {KATEGORI_SESERAHAN.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Nama Barang</label>
+                <input type="text" placeholder="Masukkan nama barang" required className="w-full p-4 rounded-xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Harga (Rp)</label>
+                <input type="text" placeholder="0" required className="w-full p-4 rounded-xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={form.harga} onChange={e => setForm({...form, harga: formatNumberInput(e.target.value)})} />
+              </div>
+            </div>
+
+            {/* Link Paling Bawah */}
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Link Referensi / Checkout (Opsional)</label>
+              <input 
+                type="url" 
+                placeholder="https://shopee.co.id/..." 
+                className="w-full p-4 rounded-xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" 
+                value={form.link} 
+                onChange={e => setForm({...form, link: e.target.value})} 
+              />
+            </div>
+
+            <button className="bg-rose-400 hover:bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg transition-all mt-2">Simpan ke Daftar</button>
+          </form>
+        </GlassCard>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {data.map(item => (
+          <GlassCard key={item.id} className="relative group hover:border-pink-300 transition-all duration-300">
+            <button onClick={() => deleteDoc(doc(db, userPath, 'seserahan', item.id))} className="absolute top-4 right-4 text-pink-200 hover:text-rose-500 p-2 transition-colors"><Trash2 size={20}/></button>
+            <div className="flex justify-between items-start mb-3">
+              <p className="text-[10px] bg-pink-50 text-pink-700 px-3 py-1 rounded-full font-bold tracking-wider uppercase border border-pink-100">{item.kategori}</p>
+              <span className={`text-[9px] font-bold uppercase px-2 py-1 rounded ${item.status === 'Selesai' ? 'text-emerald-600 bg-emerald-50' : 'text-amber-600 bg-amber-50'}`}>
+                {item.status}
+              </span>
+            </div>
+            <h3 className="font-serif font-bold text-xl text-stone-800 mb-1">{item.nama}</h3>
+            <p className="text-rose-600 font-bold text-lg mb-4">{format(item.harga)}</p>
+            
+            {item.link && (
+              <a 
+                href={item.link} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="inline-flex items-center gap-2 text-xs text-rose-400 hover:text-rose-600 font-bold bg-rose-50/50 px-3 py-2 rounded-xl transition-all"
+              >
+                <ExternalLink size={14} /> Kunjungi Tautan
+              </a>
+            )}
+          </GlassCard>
+        ))}
+        {data.length === 0 && !isAdding && (
+          <div className="col-span-full py-20 text-center text-stone-400 border-2 border-dashed border-pink-100 rounded-[2.5rem] bg-white/30 backdrop-blur-sm">Belum ada barang seserahan tercatat.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Tabungan({ userPath, data, format, db, rencanaAnggaran }) {
+  const [form, setForm] = useState({ tanggal: new Date().toISOString().split('T')[0], jumlah: '', nama: '' });
+  const [targetInput, setTargetInput] = useState(formatNumberInput(rencanaAnggaran));
+  const [isEditingTarget, setIsEditingTarget] = useState(false);
+
+  const saveTarget = async () => {
+    const val = parseNumberInput(targetInput);
+    await setDoc(doc(db, userPath, 'app_data', 'settings'), { rencanaAnggaran: val }, { merge: true });
+    kirimKeSpreadsheet("Target_Anggaran", { Target: val });
+    setIsEditingTarget(false);
+  };
+  const addHistory = async (e) => {
+    e.preventDefault();
+    const finalData = { ...form, jumlah: parseNumberInput(form.jumlah) };
+    await addDoc(collection(db, userPath, 'tabungan'), finalData);
+    kirimKeSpreadsheet("Tabungan", finalData);
+    setForm({ ...form, jumlah: '', nama: '' });
+  };
+  return (
+    <div className="space-y-6">
+      <GlassCard className="flex justify-between items-center border-pink-200 shadow-lg">
+        <div><p className="text-[10px] uppercase text-stone-500 font-bold tracking-widest mb-1">Target Anggaran</p>
+        {isEditingTarget ? <div className="flex items-center gap-2 font-bold text-rose-900 text-2xl"><span>Rp</span><input type="text" value={targetInput} onChange={e => setTargetInput(formatNumberInput(e.target.value))} className="bg-transparent border-b-2 border-pink-300 outline-none w-full max-w-[200px]"/></div> : <p className="text-3xl font-serif font-bold text-rose-900">{format(rencanaAnggaran)}</p>}
+        </div>
+        <button onClick={isEditingTarget ? saveTarget : () => setIsEditingTarget(true)} className="p-3 bg-pink-50 text-pink-600 rounded-2xl hover:bg-pink-100 transition-colors shadow-sm">{isEditingTarget ? <Save size={24}/> : <Edit2 size={24}/>}</button>
+      </GlassCard>
+      <GlassCard className="border-pink-200"><h3 className="font-serif font-bold text-xl text-rose-900 mb-6">Catat Setoran Baru</h3>
+        <form onSubmit={addHistory} className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Tanggal</label><input type="date" required className="w-full p-4 rounded-xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={form.tanggal} onChange={e => setForm({...form, tanggal: e.target.value})} /></div>
+          <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Penabung</label><input type="text" placeholder="Nama" required className="w-full p-4 rounded-xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} /></div>
+          <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Nominal (Rp)</label><input type="text" placeholder="0" required className="w-full p-4 rounded-xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={form.jumlah} onChange={e => setForm({...form, jumlah: formatNumberInput(e.target.value)})} /></div>
+          <button className="bg-rose-400 hover:bg-rose-500 text-white p-4 rounded-2xl font-bold md:col-span-3 shadow-lg transition-all mt-2">Simpan Catatan</button>
+        </form>
+      </GlassCard>
+      <GlassCard className="p-0 overflow-hidden shadow-xl border-pink-100">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-pink-50/80 text-[10px] uppercase text-stone-500 font-bold tracking-widest border-b border-pink-100"><tr><th className="p-5">Tgl</th><th className="p-5">Nama</th><th className="p-5 text-right">Jumlah</th><th className="p-5 text-right">Aksi</th></tr></thead>
+            <tbody>{data.map(item => (<tr key={item.id} className="border-t border-pink-50 hover:bg-white/40 transition-colors"><td className="p-5 text-xs text-stone-600">{item.tanggal}</td><td className="p-5 font-bold text-sm text-stone-800">{item.nama}</td><td className="p-5 text-right font-bold text-rose-600 text-base">{format(item.jumlah)}</td><td className="p-5 text-right"><button onClick={() => deleteDoc(doc(db, userPath, 'tabungan', item.id))} className="text-pink-200 hover:text-rose-500 transition-colors p-2"><Trash2 size={16}/></button></td></tr>))}</tbody>
+          </table>
+        </div>
+      </GlassCard>
+    </div>
+  );
+}
+
+function BookingWO({ userPath, data, format, db }) {
+  const [f, setF] = useState({ namaWO: data.namaWO || '', totalHarga: formatNumberInput(data.totalHarga), dpMasuk: formatNumberInput(data.dpMasuk), status: data.status || 'Survey' });
+  const [edit, setEdit] = useState(!data.namaWO);
+  useEffect(() => { setF({ namaWO: data.namaWO || '', totalHarga: formatNumberInput(data.totalHarga), dpMasuk: formatNumberInput(data.dpMasuk), status: data.status || 'Survey' }); }, [data]);
+  const save = async () => {
+    const finalData = { ...f, totalHarga: parseNumberInput(f.totalHarga), dpMasuk: parseNumberInput(f.dpMasuk) };
+    await setDoc(doc(db, userPath, 'app_data', 'wo_booking'), finalData, { merge: true });
+    kirimKeSpreadsheet("Wedding_Organizer", finalData);
+    setEdit(false);
+  };
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center"><h1 className="text-3xl font-serif font-bold text-rose-900">Vendor Wedding Organizer</h1><button onClick={() => setEdit(!edit)} className="p-2 bg-white/80 rounded-xl text-pink-600 shadow-sm border border-pink-100">{edit ? <X size={20}/> : <Edit2 size={20}/>}</button></div>
+      <GlassCard className="border-pink-200 shadow-xl">
+        {edit ? (
+          <div className="space-y-5 animate-in slide-in-from-bottom-4">
+            <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Nama Vendor</label><input type="text" placeholder="Masukkan nama WO" className="w-full p-4 rounded-2xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={f.namaWO} onChange={e => setF({...f, namaWO: e.target.value})} /></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Total Harga</label><input type="text" placeholder="0" className="w-full p-4 rounded-2xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={f.totalHarga} onChange={e => setF({...f, totalHarga: formatNumberInput(f.target.value)})} /></div>
+              <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">DP / Terbayar</label><input type="text" placeholder="0" className="w-full p-4 rounded-2xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" value={f.dpMasuk} onChange={e => setF({...f, dpMasuk: formatNumberInput(f.target.value)})} /></div>
+            </div>
+            <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Status</label><select className="w-full p-4 rounded-2xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all font-medium text-stone-700" value={f.status} onChange={e => setF({...f, status: e.target.value})}><option value="Survey">Survey / Diskusi</option><option value="Booking Fee">Booking Fee / DP</option><option value="Lunas">Pelunasan Selesai</option></select></div>
+            <button onClick={save} className="w-full bg-rose-400 hover:bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg transition-all mt-4">Simpan Data Vendor</button>
+          </div>
+        ) : (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex justify-between items-start"><h2 className="text-3xl font-serif font-bold text-rose-950 leading-tight">{data.namaWO || 'Belum Ada Vendor'}</h2><span className="text-[10px] bg-rose-50 text-rose-600 px-3 py-1.5 rounded-full font-bold uppercase tracking-wider border border-rose-100 shadow-sm">{data.status}</span></div>
+            <div className="grid grid-cols-2 gap-8 py-6 border-y border-pink-100/50">
+              <div><p className="text-[10px] text-stone-400 uppercase font-bold tracking-widest mb-1">Total Kontrak</p><p className="text-2xl font-bold text-stone-800">{format(data.totalHarga)}</p></div>
+              <div><p className="text-[10px] text-stone-400 uppercase font-bold tracking-widest mb-1">Terbayar (DP)</p><p className="text-2xl font-bold text-emerald-500">{format(data.dpMasuk)}</p></div>
+            </div>
+            <div className="pt-2"><p className="text-[10px] text-stone-400 uppercase font-bold tracking-widest mb-1">Sisa Kewajiban Pelunasan</p><p className="text-4xl font-bold text-rose-600 drop-shadow-sm">{format(data.totalHarga - data.dpMasuk)}</p></div>
+          </div>
+        )}
+      </GlassCard>
+    </div>
+  );
+}
+
+function Pengaturan({ userPath, settings, db }) {
+  const [f, setF] = useState({ username: settings.username || '', password: settings.password || '' });
+  const [msg, setMsg] = useState('');
+  const [show, setShow] = useState(false);
+  const save = async () => {
+    await setDoc(doc(db, userPath, 'app_data', 'settings'), f, { merge: true });
+    kirimKeSpreadsheet("Akun", { Username: f.username });
+    setMsg('Detail akun berhasil diperbarui!');
+    setTimeout(() => setMsg(''), 3000);
+  };
+  return (
+    <div className="max-w-md mx-auto space-y-8 py-10 animate-in fade-in duration-500">
+      <div className="text-center space-y-2"><div className="bg-pink-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-pink-600 shadow-inner border border-pink-200"><UserCircle size={48}/></div><h1 className="text-3xl font-serif font-bold text-rose-900">Pengaturan Akun</h1></div>
+      <GlassCard className="space-y-5 border-pink-200 shadow-2xl">
+        <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Username</label><input type="text" value={f.username} onChange={e => setF({...f, username: e.target.value})} className="w-full p-4 rounded-2xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all" placeholder="Username" /></div>
+        <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Password Baru</label><div className="relative">
+          <input type={show ? "text" : "password"} value={f.password} onChange={e => setF({...f, password: e.target.value})} className="w-full p-4 rounded-2xl bg-white/80 border border-pink-100 outline-none focus:ring-2 focus:ring-pink-300 transition-all tracking-widest" placeholder="Password" />
+          <button onClick={() => setShow(!show)} className="absolute right-4 top-4 text-pink-300 hover:text-pink-600 transition-colors">{show ? <EyeOff size={24}/> : <Eye size={24}/>}</button>
+        </div></div>
+        {msg && <p className="text-emerald-500 text-center font-bold animate-bounce bg-emerald-50 py-2 rounded-xl">{msg}</p>}
+        <button onClick={save} className="w-full bg-rose-400 hover:bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg transition-all mt-4">Simpan Perubahan</button>
+      </GlassCard>
+    </div>
+  );
+}
