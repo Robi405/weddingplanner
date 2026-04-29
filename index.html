@@ -15,12 +15,16 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;600;700&display=swap');
         
-        body { font-family: 'Inter', sans-serif; background-color: #fdf2f8; }
+        body { font-family: 'Inter', sans-serif; background-color: #fff1f2; margin: 0; }
         .font-serif { font-family: 'Playfair Display', serif; }
         
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(244, 114, 182, 0.2); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(244, 114, 182, 0.3); border-radius: 10px; }
+        
+        /* Animasi halu */
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
@@ -32,291 +36,148 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs };
+        // Simpan ke window agar bisa diakses oleh skrip Babel
+        window.FirebaseLib = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs };
     </script>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
         
-        // --- KONFIGURASI ---
-        const SPREADSHEET_URL = "https://script.google.com/macros/s/AKfycbxxuRJW8RLcCs_oQ_hiJ9RbUblT-srDnjAvXzfRFXqjGKbKD932Rr8g46uH01ogq38-/exec"; 
+        // --- DATA KONFIGURASI ---
+        // PENTING: Jika di GitHub, pastikan config ini terisi data asli Firebase Anda
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "", 
+            authDomain: "", 
+            projectId: "", 
+            storageBucket: "", 
+            messagingSenderId: "", 
+            appId: ""
+        };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'wedding-planner-robi';
         const INITIAL_ADMIN_USER = "admin_wedding"; 
         const INITIAL_ADMIN_PASS = "admin12345";
-        
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-            apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: ""
-        };
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'wedding-planner-master';
 
-        const KATEGORI_SESERAHAN = [
-            "Perangkat Alat Sholat", "Make Up & Skin Care", "Peralatan Mandi",
-            "Pakaian Dalam", "Pakaian Outer", "Perhiasan", "Tambahan"
-        ];
+        const KATEGORI_SESERAHAN = ["Alat Sholat", "Make Up", "Peralatan Mandi", "Pakaian", "Perhiasan", "Lainnya"];
 
-        // Helpers
+        // --- HELPERS ---
         const formatRupiah = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
-        const formatNumberInput = (v) => {
-            if (!v) return '';
-            const s = v.toString().replace(/\D/g, '');
-            return s ? parseInt(s, 10).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '';
-        };
-        const parseNumberInput = (v) => v ? Number(v.toString().replace(/\./g, '')) : 0;
+        const formatInput = (v) => v.toString().replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+        const parseInput = (v) => Number(v.toString().replace(/\./g, ''));
 
-        // Unified Icon Component - Fixes ReferenceError
+        // Komponen Ikon yang Aman (Tidak akan error jika Lucide belum load)
         const Icon = ({ name, size = 20, className = "" }) => {
-            const LucideIcon = lucideReact[name];
-            return LucideIcon ? <LucideIcon size={size} className={className} /> : null;
+            const lib = window.lucideReact || window.LucideReact;
+            if (!lib) return <div style={{width: size, height: size}} className="bg-gray-200 rounded-full animate-pulse" />;
+            const LucideIcon = lib[name];
+            return LucideIcon ? <LucideIcon size={size} className={className} /> : <span className="text-[8px]">?</span>;
         };
 
-        const GlassCard = ({ children, className = '' }) => (
-            <div className={`bg-white/70 backdrop-blur-md border border-pink-100 rounded-3xl p-6 shadow-sm ${className}`}>{children}</div>
+        const Card = ({ children, className = "" }) => (
+            <div className={`bg-white/80 backdrop-blur-sm border border-rose-100 rounded-[2rem] p-6 shadow-sm ${className}`}>{children}</div>
         );
 
         // ==========================================
-        // SUB-KOMPONEN APLIKASI
+        // KOMPONEN LAYAR
         // ==========================================
 
         const Dashboard = ({ stats, name, currentClientId, db }) => {
-            const [val, setVal] = useState(name || 'Romeo & Juliet');
+            const [localName, setLocalName] = useState(name || 'Pasangan Bahagia');
             const [isEdit, setIsEdit] = useState(false);
-            useEffect(() => { if (name) setVal(name); }, [name]);
 
-            const save = async () => {
-                const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'client_settings', currentClientId);
-                await window.FB.setDoc(docRef, { namaPasangan: val }, { merge: true });
+            const saveName = async () => {
+                const docRef = window.FirebaseLib.doc(db, 'artifacts', appId, 'public', 'data', 'client_settings', currentClientId);
+                await window.FirebaseLib.setDoc(docRef, { namaPasangan: localName }, { merge: true });
                 setIsEdit(false);
             };
 
             return (
-                <div className="space-y-8 animate-in fade-in duration-500">
-                    <div className="flex flex-col items-center md:items-start">
-                        <p className="text-pink-500 font-bold tracking-widest text-xs uppercase mb-1">Rencana Pernikahan</p>
-                        <div className="flex items-center gap-4 mt-2">
+                <div className="space-y-6 fade-in">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <p className="text-rose-400 text-xs font-bold uppercase tracking-widest">Jurnal Pernikahan</p>
                             {isEdit ? (
-                                <div className="flex gap-2"><input type="text" value={val} onChange={e => setVal(e.target.value)} className="text-2xl font-serif p-2 rounded-xl bg-white border border-pink-200 outline-none"/><button onClick={save} className="bg-rose-400 text-white p-3 rounded-xl shadow-md"><Icon name="Save" /></button></div>
+                                <div className="flex gap-2 mt-2">
+                                    <input value={localName} onChange={e => setLocalName(e.target.value)} className="border-b-2 border-rose-300 outline-none bg-transparent text-2xl font-serif" />
+                                    <button onClick={saveName} className="text-green-500"><Icon name="Check" /></button>
+                                </div>
                             ) : (
-                                <div className="flex items-center gap-4"><h1 className="text-3xl md:text-5xl font-serif font-bold text-gray-800">{val}</h1><button onClick={() => setIsEdit(true)} className="text-pink-300 hover:text-pink-500"><Icon name="Edit3" size={24}/></button></div>
+                                <div className="flex items-center gap-3 mt-2">
+                                    <h1 className="text-3xl font-serif font-bold text-rose-900">{localName}</h1>
+                                    <button onClick={() => setIsEdit(true)} className="text-rose-300"><Icon name="Edit3" size={18} /></button>
+                                </div>
                             )}
                         </div>
                     </div>
-                    <GlassCard className="bg-gradient-to-br from-pink-400 to-rose-400 text-white border-none shadow-xl">
-                        <div className="flex justify-between items-end">
-                            <div><p className="text-white/80 text-xs uppercase font-bold mb-1">Tabungan</p><h2 className="text-3xl md:text-5xl font-bold">{formatRupiah(stats.totalTabungan)}</h2></div>
-                            <div className="text-right"><p className="text-white/80 text-xs uppercase font-bold mb-1">Target</p><h3 className="text-xl md:text-2xl font-semibold">{formatRupiah(stats.rencanaAnggaran)}</h3></div>
-                        </div>
-                        <div className="mt-8 bg-white/20 p-4 rounded-2xl">
-                            <div className="flex justify-between text-xs mb-2 font-bold uppercase"><span>Progres</span><span>{((stats.totalTabungan/stats.rencanaAnggaran)*100 || 0).toFixed(1)}%</span></div>
-                            <div className="h-3 bg-black/10 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-white transition-all duration-1000 shadow-lg" style={{width: `${(stats.totalTabungan/stats.rencanaAnggaran)*100}%`}}></div></div>
-                        </div>
-                    </GlassCard>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                        <GlassCard className="hover:scale-105 transition-all"><p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Seserahan</p><p className="text-2xl font-bold text-rose-900">{formatRupiah(stats.totalSeserahan)}</p></GlassCard>
-                        <GlassCard className="hover:scale-105 transition-all"><p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Vendor WO</p><p className="text-2xl font-bold text-rose-900">{formatRupiah(stats.totalWO)}</p></GlassCard>
-                        <GlassCard className="hover:scale-105 transition-all"><p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Sisa Bayar</p><p className="text-2xl font-bold text-rose-600">{formatRupiah(stats.totalWO - stats.dpWO)}</p></GlassCard>
-                    </div>
-                </div>
-            );
-        };
 
-        const Seserahan = ({ db, currentClientId, data }) => {
-            const [form, setForm] = useState({ nama: '', harga: '', kategori: KATEGORI_SESERAHAN[0] });
-            const add = async (e) => {
-                e.preventDefault();
-                await window.FB.addDoc(window.FB.collection(db, 'artifacts', appId, 'public', 'data', `seserahan_${currentClientId}`), { ...form, harga: parseNumberInput(form.harga) });
-                setForm({ nama: '', harga: '', kategori: KATEGORI_SESERAHAN[0] });
-            };
-            const del = async (id) => await window.FB.deleteDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', `seserahan_${currentClientId}`, id));
-
-            return (
-                <div className="space-y-6">
-                    <h1 className="text-3xl font-serif font-bold text-gray-800">Seserahan</h1>
-                    <GlassCard>
-                        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <input type="text" placeholder="Nama Barang" className="p-4 rounded-xl border outline-none" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} required />
-                            <input type="text" placeholder="Harga (Rp)" className="p-4 rounded-xl border outline-none" value={form.harga} onChange={e => setForm({...form, harga: formatNumberInput(e.target.value)})} required />
-                            <select className="p-4 rounded-xl border outline-none" value={form.kategori} onChange={e => setForm({...form, kategori: e.target.value})}>
-                                {KATEGORI_SESERAHAN.map(k => <option key={k} value={k}>{k}</option>)}
-                            </select>
-                            <button className="md:col-span-3 bg-pink-500 text-white p-4 rounded-xl font-bold">Simpan Seserahan</button>
-                        </form>
-                    </GlassCard>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        {data.map(item => (
-                            <GlassCard key={item.id} className="relative group">
-                                <button onClick={() => del(item.id)} className="absolute top-4 right-4 text-gray-200 hover:text-red-500 transition-colors"><Icon name="Trash2" /></button>
-                                <span className="text-[10px] bg-pink-50 text-pink-600 px-3 py-1 rounded-full font-bold uppercase border border-pink-100">{item.kategori}</span>
-                                <h3 className="font-bold text-lg mt-2">{item.nama}</h3>
-                                <p className="text-rose-600 font-bold">{formatRupiah(item.harga)}</p>
-                            </GlassCard>
-                        ))}
-                    </div>
-                </div>
-            );
-        };
-
-        const Tabungan = ({ db, currentClientId, data, target }) => {
-            const [form, setForm] = useState({ tanggal: new Date().toISOString().split('T')[0], jumlah: '', nama: '' });
-            const add = async (e) => {
-                e.preventDefault();
-                await window.FB.addDoc(window.FB.collection(db, 'artifacts', appId, 'public', 'data', `tabungan_${currentClientId}`), { ...form, jumlah: parseNumberInput(form.jumlah) });
-                setForm({ ...form, jumlah: '', nama: '' });
-            };
-            return (
-                <div className="space-y-6">
-                    <h1 className="text-3xl font-serif font-bold text-gray-800">Tabungan</h1>
-                    <GlassCard>
-                        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <input type="date" className="p-4 rounded-xl border outline-none" value={form.tanggal} onChange={e => setForm({...form, tanggal: e.target.value})} />
-                            <input type="text" placeholder="Penyetor" className="p-4 rounded-xl border outline-none" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} required />
-                            <input type="text" placeholder="Jumlah (Rp)" className="p-4 rounded-xl border outline-none" value={form.jumlah} onChange={e => setForm({...form, jumlah: formatNumberInput(e.target.value)})} required />
-                            <button className="md:col-span-3 bg-pink-500 text-white p-4 rounded-xl font-bold">Catat Setoran</button>
-                        </form>
-                    </GlassCard>
-                    <GlassCard className="p-0 overflow-hidden">
-                        <table className="w-full text-left">
-                            <thead className="bg-pink-50 text-xs font-bold uppercase"><tr><th className="p-4">Tgl</th><th className="p-4">Nama</th><th className="p-4 text-right">Jumlah</th></tr></thead>
-                            <tbody>
-                                {data.map(item => (
-                                    <tr key={item.id} className="border-t hover:bg-white/50">
-                                        <td className="p-4 text-xs">{item.tanggal}</td>
-                                        <td className="p-4 font-bold">{item.nama}</td>
-                                        <td className="p-4 text-right font-bold text-rose-600">{formatRupiah(item.jumlah)}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </GlassCard>
-                </div>
-            );
-        };
-
-        const BookingWO = ({ db, currentClientId, data }) => {
-            const [f, setF] = useState({ namaWO: '', totalHarga: '', dpMasuk: '', status: 'Survey' });
-            const [edit, setEdit] = useState(!data.namaWO);
-            useEffect(() => { if (data) setF({ namaWO: data.namaWO || '', totalHarga: formatNumberInput(data.totalHarga), dpMasuk: formatNumberInput(data.dpMasuk), status: data.status || 'Survey' }); }, [data]);
-            
-            const save = async () => {
-                await window.FB.setDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'client_wo', currentClientId), { ...f, totalHarga: parseNumberInput(f.totalHarga), dpMasuk: parseNumberInput(f.dpMasuk) }, { merge: true });
-                setEdit(false);
-            };
-
-            return (
-                <div className="space-y-6">
-                    <div className="flex justify-between items-center"><h1 className="text-3xl font-serif font-bold text-gray-800">Wedding Organizer</h1><button onClick={() => setEdit(!edit)} className="text-pink-400">{edit ? <Icon name="X" /> : <Icon name="Edit2" />}</button></div>
-                    <GlassCard>
-                        {edit ? (
-                            <div className="space-y-4">
-                                <input type="text" placeholder="Nama WO" className="w-full p-4 rounded-xl border outline-none" value={f.namaWO} onChange={e => setF({...f, namaWO: e.target.value})} />
-                                <div className="grid grid-cols-2 gap-4">
-                                    <input type="text" placeholder="Total Kontrak" className="w-full p-4 rounded-xl border outline-none" value={f.totalHarga} onChange={e => setF({...f, totalHarga: formatNumberInput(e.target.value)})} />
-                                    <input type="text" placeholder="DP Terbayar" className="w-full p-4 rounded-xl border outline-none" value={f.dpMasuk} onChange={e => setF({...f, dpMasuk: formatNumberInput(e.target.value)})} />
+                    <div className="bg-gradient-to-br from-rose-400 to-pink-500 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
+                        <div className="relative z-10">
+                            <p className="text-rose-100 text-sm">Total Tabungan</p>
+                            <h2 className="text-4xl font-bold my-2">{formatRupiah(stats.totalTabungan)}</h2>
+                            <div className="mt-6">
+                                <div className="flex justify-between text-xs mb-2 font-bold">
+                                    <span>Target: {formatRupiah(stats.target)}</span>
+                                    <span>{((stats.totalTabungan/stats.target)*100 || 0).toFixed(1)}%</span>
                                 </div>
-                                <select className="w-full p-4 rounded-xl border outline-none" value={f.status} onChange={e => setF({...f, status: e.target.value})}>
-                                    <option value="Survey">Survey</option><option value="Booking">Booking</option><option value="Lunas">Lunas</option>
-                                </select>
-                                <button onClick={save} className="w-full bg-pink-500 text-white p-4 rounded-xl font-bold">Simpan Data WO</button>
-                            </div>
-                        ) : (
-                            <div className="text-center md:text-left">
-                                <h2 className="text-2xl font-serif font-bold mb-4">{data.namaWO || 'Belum Ada WO'}</h2>
-                                <div className="grid grid-cols-2 gap-4 border-y border-pink-50 py-4 mb-4">
-                                    <div><p className="text-xs text-gray-400">Total</p><p className="font-bold">{formatRupiah(data.totalHarga)}</p></div>
-                                    <div><p className="text-xs text-gray-400">DP</p><p className="font-bold text-emerald-500">{formatRupiah(data.dpMasuk)}</p></div>
+                                <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                                    <div className="h-full bg-white transition-all duration-1000" style={{width: `${Math.min((stats.totalTabungan/stats.target)*100, 100)}%`}}></div>
                                 </div>
-                                <p className="text-xs text-gray-400">Sisa Pelunasan</p>
-                                <p className="text-3xl font-bold text-rose-600">{formatRupiah(data.totalHarga - data.dpMasuk)}</p>
                             </div>
-                        )}
-                    </GlassCard>
+                        </div>
+                        <Icon name="Heart" size={150} className="absolute -right-10 -bottom-10 opacity-10 rotate-12" />
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <Card><p className="text-[10px] uppercase font-bold text-gray-400">Seserahan</p><p className="text-xl font-bold text-rose-900">{formatRupiah(stats.totalSeserahan)}</p></Card>
+                        <Card><p className="text-[10px] uppercase font-bold text-gray-400">Vendor WO</p><p className="text-xl font-bold text-rose-900">{formatRupiah(stats.totalWO)}</p></Card>
+                        <Card className="col-span-2 md:col-span-1"><p className="text-[10px] uppercase font-bold text-gray-400">Kekurangan</p><p className="text-xl font-bold text-rose-500">{formatRupiah(stats.totalWO - stats.dpWO)}</p></Card>
+                    </div>
                 </div>
             );
         };
 
         const AdminPanel = ({ allClients, db, adminData, onLogout }) => {
             const [form, setForm] = useState({ username: '', password: '', licenseId: '', expiryDate: '', isActive: true });
-            const [adminForm, setAdminForm] = useState({ ...adminData });
             const add = async (e) => {
                 e.preventDefault();
-                await window.FB.addDoc(window.FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), { ...form });
+                await window.FirebaseLib.addDoc(window.FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), form);
                 setForm({ username: '', password: '', licenseId: '', expiryDate: '', isActive: true });
             };
-            const updateAdmin = async () => {
-                await window.FB.setDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account'), adminForm, { merge: true });
-                alert('Akses Admin Diperbarui!');
-            };
-            const toggle = async (id, current) => {
-                await window.FB.updateDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'subscriptions', id), { isActive: !current });
-            };
             return (
-                <div className="space-y-10 max-w-5xl mx-auto pb-10">
-                    <div className="flex justify-between items-center"><h1 className="text-3xl font-serif font-bold text-gray-800">Panel Master Admin</h1><button onClick={onLogout} className="bg-rose-500 text-white px-6 py-2 rounded-xl font-bold shadow-md flex items-center gap-2"><Icon name="LogOut" /> Logout</button></div>
-                    <GlassCard>
-                        <h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="ShieldCheck" className="text-pink-500" /> Kredensial Master</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <input type="text" className="p-4 rounded-xl border outline-none" value={adminForm.username} onChange={e => setAdminForm({...adminForm, username: e.target.value})} />
-                            <input type="text" className="p-4 rounded-xl border outline-none" value={adminForm.password} onChange={e => setAdminForm({...adminForm, password: e.target.value})} />
-                            <button onClick={updateAdmin} className="md:col-span-2 bg-slate-800 text-white p-4 rounded-xl font-bold">Simpan Kredensial Baru</button>
-                        </div>
-                    </GlassCard>
-                    <GlassCard>
-                        <h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="UserPlus" className="text-pink-500" /> Tambah Pembeli Baru</h3>
+                <div className="space-y-8 fade-in max-w-4xl mx-auto">
+                    <div className="flex justify-between items-center">
+                        <h1 className="text-2xl font-serif font-bold">Panel Master Admin</h1>
+                        <button onClick={onLogout} className="bg-rose-500 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md">Logout</button>
+                    </div>
+                    <Card className="border-rose-200">
+                        <h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="UserPlus" className="text-rose-500" /> Tambah Pelanggan</h3>
                         <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <input type="text" placeholder="Username" className="p-4 rounded-xl border outline-none" value={form.username} onChange={e => setForm({...form, username: e.target.value})} required />
-                            <input type="text" placeholder="Password" className="p-4 rounded-xl border outline-none" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
-                            <input type="text" placeholder="License ID" className="p-4 rounded-xl border outline-none" value={form.licenseId} onChange={e => setForm({...form, licenseId: e.target.value})} required />
-                            <input type="date" className="p-4 rounded-xl border outline-none" value={form.expiryDate} onChange={e => setForm({...form, expiryDate: e.target.value})} required />
-                            <button className="md:col-span-2 bg-rose-400 text-white p-4 rounded-xl font-bold uppercase">Daftarkan & Aktifkan</button>
+                            <input placeholder="Username" className="p-3 border rounded-xl" value={form.username} onChange={e => setForm({...form, username: e.target.value})} required />
+                            <input placeholder="Password" className="p-3 border rounded-xl" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+                            <input placeholder="ID Lisensi" className="p-3 border rounded-xl" value={form.licenseId} onChange={e => setForm({...form, licenseId: e.target.value})} required />
+                            <input type="date" className="p-3 border rounded-xl" value={form.expiryDate} onChange={e => setForm({...form, expiryDate: e.target.value})} required />
+                            <button className="md:col-span-2 bg-rose-500 text-white p-4 rounded-xl font-bold">Aktifkan Lisensi</button>
                         </form>
-                    </GlassCard>
-                    <GlassCard className="p-0 overflow-hidden shadow-xl border-pink-100">
-                        <div className="p-6 bg-pink-50 border-b border-pink-100 flex justify-between items-center"><h3 className="font-serif font-bold text-rose-900 text-lg">Daftar Pelanggan Aktif</h3><span className="text-xs bg-white px-3 py-1 rounded-full font-bold text-pink-600 border border-pink-200">{allClients.length} User</span></div>
-                        <table className="w-full text-left">
-                            <thead className="bg-pink-100/50 text-xs font-bold uppercase tracking-widest text-stone-500"><tr><th className="p-5">Informasi</th><th className="p-5">Expiry</th><th className="p-5 text-right">Aksi</th></tr></thead>
+                    </Card>
+                    <Card className="p-0 overflow-hidden">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-rose-50 font-bold"><tr><th className="p-4">User</th><th className="p-4">Exp</th><th className="p-4 text-right">Aksi</th></tr></thead>
                             <tbody>
                                 {allClients.map(c => (
-                                    <tr key={c.id} className="border-t hover:bg-white/50">
-                                        <td className="p-5 font-bold">{c.username}<br/><span className="text-[10px] text-pink-400 font-mono tracking-tighter uppercase font-bold">ID: {c.licenseId}</span></td>
-                                        <td className="p-5 text-xs">{c.expiryDate}</td>
-                                        <td className="p-5 text-right"><button onClick={() => toggle(c.id, c.isActive)} className={`p-3 rounded-xl border transition-all ${c.isActive ? 'text-green-500 bg-green-50' : 'text-red-500 bg-red-50'}`}><Icon name="Power" size={18}/></button></td>
+                                    <tr key={c.id} className="border-t">
+                                        <td className="p-4 font-bold">{c.username}</td>
+                                        <td className="p-4">{c.expiryDate}</td>
+                                        <td className="p-4 text-right"><Icon name={c.isActive ? "CheckCircle" : "XCircle"} className={c.isActive ? "text-green-500 ml-auto" : "text-gray-300 ml-auto"} /></td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
-                    </GlassCard>
-                </div>
-            );
-        };
-
-        const PengaturanAkun = ({ db, loginUsername, setLoginUsername, onLogout }) => {
-            const [f, setF] = useState({ username: loginUsername, password: '' });
-            const [msg, setMsg] = useState('');
-            const save = async () => {
-                const q = window.FB.query(window.FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), window.FB.where("username", "==", loginUsername));
-                const snap = await window.FB.getDocs(q);
-                if (!snap.empty) {
-                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'subscriptions', snap.docs[0].id);
-                    await window.FB.updateDoc(docRef, { username: f.username, password: f.password || snap.docs[0].data().password });
-                    setLoginUsername(f.username);
-                    setMsg('Akses Diperbarui!');
-                    setTimeout(() => setMsg(''), 5000);
-                }
-            };
-            return (
-                <div className="max-w-md mx-auto space-y-8 animate-in fade-in py-10">
-                    <div className="text-center space-y-2"><div className="bg-white/80 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-pink-500 shadow-md border border-pink-100"><Icon name="UserCircle" size={48}/></div><h1 className="text-2xl font-serif font-bold text-gray-800">Akun Saya</h1></div>
-                    <GlassCard className="space-y-4">
-                        <input type="text" value={f.username} onChange={e => setF({...f, username: e.target.value})} className="w-full p-4 rounded-xl border outline-none" placeholder="Username" />
-                        <input type="password" value={f.password} onChange={e => setF({...f, password: e.target.value})} className="w-full p-4 rounded-xl border outline-none tracking-widest" placeholder="Password Baru (Kosongkan jika tak diubah)" />
-                        {msg && <p className="text-green-500 text-center text-xs font-bold">{msg}</p>}
-                        <button onClick={save} className="w-full bg-pink-500 text-white p-4 rounded-xl font-bold shadow-lg">Simpan Perubahan</button>
-                        <button onClick={onLogout} className="w-full bg-gray-100 text-red-500 p-4 rounded-xl font-bold border border-red-50 mt-4 flex items-center justify-center gap-2"><Icon name="LogOut" /> Logout</button>
-                    </GlassCard>
+                    </Card>
                 </div>
             );
         };
 
         // ==========================================
-        // APLIKASI UTAMA (ROOT)
+        // ROOT APPLICATION
         // ==========================================
 
         function App() {
@@ -328,126 +189,121 @@
             const [currentClientId, setCurrentClientId] = useState(null);
             
             const [masterAdminData, setMasterAdminData] = useState({ username: INITIAL_ADMIN_USER, password: INITIAL_ADMIN_PASS });
-            const [loginUsername, setLoginUsername] = useState('');
-            const [loginPassword, setLoginPassword] = useState('');
+            const [loginForm, setLoginForm] = useState({ u: '', p: '' });
             const [loginError, setLoginError] = useState('');
 
-            const [appSettings, setAppSettings] = useState({ namaPasangan: '', rencanaAnggaran: 0 });
+            // Wedding Data States
+            const [settings, setSettings] = useState({ namaPasangan: '', rencanaAnggaran: 100000000 });
             const [seserahan, setSeserahan] = useState([]);
             const [tabungan, setTabungan] = useState([]);
-            const [woData, setWoData] = useState({ namaWO: '', totalHarga: 0, dpMasuk: 0, status: 'Survey' });
-            const [allClients, setAllClients] = useState([]);
+            const [wo, setWo] = useState({ namaWO: '', totalHarga: 0, dpMasuk: 0 });
+            const [clients, setClients] = useState([]);
 
-            const { FB } = window;
-            const app = FB.initializeApp(firebaseConfig);
-            const auth = FB.getAuth(app);
-            const db = FB.getFirestore(app);
+            const { FirebaseLib } = window;
+            const app = FirebaseLib.initializeApp(firebaseConfig);
+            const auth = FirebaseLib.getAuth(app);
+            const db = FirebaseLib.getFirestore(app);
 
             useEffect(() => {
-                const unsub = FB.onAuthStateChanged(auth, (u) => { setUser(u); setIsAuthReady(true); });
-                FB.signInAnonymously(auth).catch(console.error);
+                const unsub = FirebaseLib.onAuthStateChanged(auth, (u) => { setUser(u); setIsAuthReady(true); });
+                FirebaseLib.signInAnonymously(auth).catch(err => console.error("Firebase Login Error. Check your Config!"));
                 return unsub;
             }, []);
 
+            // Global Snapshots
             useEffect(() => {
                 if (!user || !isAuthReady) return;
-                const adminRef = FB.doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account');
-                return FB.onSnapshot(adminRef, (d) => d.exists() && setMasterAdminData(d.data()));
+                const adminRef = FirebaseLib.doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account');
+                return FirebaseLib.onSnapshot(adminRef, (d) => d.exists() && setMasterAdminData(d.data()));
             }, [user, isAuthReady]);
 
             useEffect(() => {
                 if (!user || !isAdmin || !isAuthReady) return;
-                const clientsRef = FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions');
-                return FB.onSnapshot(clientsRef, (s) => setAllClients(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+                const q = FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions');
+                return FirebaseLib.onSnapshot(q, (s) => setClients(s.docs.map(d => ({id: d.id, ...d.data()}))));
             }, [user, isAdmin, isAuthReady]);
 
             useEffect(() => {
                 if (!user || !currentClientId || isAdmin || !isAuthReady) return;
-                const path = (coll) => FB.collection(db, 'artifacts', appId, 'public', 'data', `${coll}_${currentClientId}`);
-                const docPath = (coll) => FB.doc(db, 'artifacts', appId, 'public', 'data', coll, currentClientId);
+                const p = (c) => FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', `${c}_${currentClientId}`);
+                const d = (c) => FirebaseLib.doc(db, 'artifacts', appId, 'public', 'data', c, currentClientId);
 
-                const unsubS = FB.onSnapshot(docPath('client_settings'), (d) => d.exists() && setAppSettings(d.data()));
-                const unsubW = FB.onSnapshot(docPath('client_wo'), (d) => d.exists() && setWoData(d.data()));
-                const unsubSes = FB.onSnapshot(path('seserahan'), (s) => setSeserahan(s.docs.map(d => ({id: d.id, ...d.data()}))));
-                const unsubTab = FB.onSnapshot(path('tabungan'), (s) => setTabungan(s.docs.map(d => ({id: d.id, ...d.data()}))));
+                const u1 = FirebaseLib.onSnapshot(d('client_settings'), (snap) => snap.exists() && setSettings(snap.data()));
+                const u2 = FirebaseLib.onSnapshot(d('client_wo'), (snap) => snap.exists() && setWo(snap.data()));
+                const u3 = FirebaseLib.onSnapshot(p('seserahan'), (snap) => setSeserahan(snap.docs.map(x => ({id: x.id, ...x.data()}))));
+                const u4 = FirebaseLib.onSnapshot(p('tabungan'), (snap) => setTabungan(snap.docs.map(x => ({id: x.id, ...x.data()}))));
                 
-                return () => { unsubS(); unsubW(); unsubSes(); unsubTab(); };
+                return () => { u1(); u2(); u3(); u4(); };
             }, [user, currentClientId, isAdmin, isAuthReady]);
 
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setLoginError('');
-                if (loginUsername === masterAdminData.username && loginPassword === masterAdminData.password) {
+                if (loginForm.u === masterAdminData.username && loginForm.p === masterAdminData.password) {
                     setIsAdmin(true); setIsLocked(false); setActiveMenu('admin_panel');
                     return;
                 }
-                try {
-                    const q = FB.query(FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), FB.where("username", "==", loginUsername), FB.where("password", "==", loginPassword));
-                    const snap = await FB.getDocs(q);
-                    if (!snap.empty) {
-                        const data = snap.docs[0].data();
-                        if (!data.isActive || new Date() > new Date(data.expiryDate)) {
-                            setLoginError('Akun tidak aktif atau masa berlaku habis.');
-                            return;
-                        }
+                const q = FirebaseLib.query(FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), FirebaseLib.where("username", "==", loginForm.u), FirebaseLib.where("password", "==", loginForm.p));
+                const snap = await FirebaseLib.getDocs(q);
+                if (!snap.empty) {
+                    const data = snap.docs[0].data();
+                    if (!data.isActive || new Date() > new Date(data.expiryDate)) {
+                        setLoginError('Akun tidak aktif atau masa berlaku habis.');
+                    } else {
                         setCurrentClientId(data.licenseId); setIsAdmin(false); setIsLocked(false); setActiveMenu('dashboard');
-                    } else { setLoginError('Username atau Password salah.'); }
-                } catch (err) { setLoginError('Terjadi kesalahan koneksi sistem.'); }
+                    }
+                } else { setLoginError('Username atau Password salah.'); }
             };
 
-            const handleLogout = () => { setIsLocked(true); setIsAdmin(false); setCurrentClientId(null); setLoginUsername(''); setLoginPassword(''); };
-
-            if (!isAuthReady || !user) return <div className="h-screen flex items-center justify-center font-bold text-pink-400 animate-pulse tracking-widest uppercase">Memuat Sistem...</div>;
+            if (!isAuthReady) return <div className="h-screen flex items-center justify-center font-bold text-rose-400">MEMULAI SISTEM...</div>;
 
             if (isLocked) {
                 return (
-                    <div className="min-h-screen flex items-center justify-center p-4">
-                        <GlassCard className="w-full max-w-md shadow-2xl text-center p-10">
-                            <div className="bg-pink-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-pink-600 shadow-inner"><Icon name="Lock" size={40} /></div>
-                            <h1 className="text-3xl font-serif font-bold text-gray-800 mb-8 tracking-widest uppercase">Wedding Access</h1>
-                            <form onSubmit={handleLogin} className="space-y-4">
-                                <input type="text" placeholder="Username" className="w-full p-4 rounded-2xl border outline-none text-center shadow-sm" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} required />
-                                <input type="password" placeholder="Password" className="w-full p-4 rounded-2xl border outline-none text-center tracking-widest shadow-sm" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} required />
-                                {loginError && <p className="text-rose-600 text-xs font-bold animate-bounce">{loginError}</p>}
-                                <button className="w-full bg-pink-500 text-white p-4 rounded-2xl font-bold shadow-lg transition-all active:scale-95">Masuk Sekarang</button>
-                            </form>
-                        </GlassCard>
+                    <div className="min-h-screen flex items-center justify-center p-4 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
+                        <div className="w-full max-w-sm fade-in">
+                            <Card className="shadow-2xl p-10 text-center">
+                                <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-6 text-rose-500"><Icon name="Lock" size={40} /></div>
+                                <h1 className="text-2xl font-serif font-bold text-rose-900 mb-8 uppercase tracking-widest">Wedding Access</h1>
+                                <form onSubmit={handleLogin} className="space-y-4">
+                                    <input placeholder="Username" className="w-full p-4 rounded-2xl border outline-none text-center" value={loginForm.u} onChange={e => setLoginForm({...loginForm, u: e.target.value})} required />
+                                    <input type="password" placeholder="Password" className="w-full p-4 rounded-2xl border outline-none text-center tracking-widest" value={loginForm.p} onChange={e => setLoginForm({...loginForm, p: e.target.value})} required />
+                                    {loginError && <p className="text-rose-500 text-xs font-bold">{loginError}</p>}
+                                    <button className="w-full bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg hover:scale-105 transition-transform">Masuk Aplikasi</button>
+                                </form>
+                            </Card>
+                        </div>
                     </div>
                 );
             }
 
-            const totalTabungan = tabungan.reduce((sum, item) => sum + Number(item.jumlah || 0), 0);
-            const totalSeserahan = seserahan.reduce((sum, item) => sum + Number(item.harga || 0), 0);
-            const totalWO = Number(woData.totalHarga || 0);
-            const dpWO = Number(woData.dpMasuk || 0);
+            const totalTabungan = tabungan.reduce((s, i) => s + Number(i.jumlah || 0), 0);
+            const totalSeserahan = seserahan.reduce((s, i) => s + Number(i.harga || 0), 0);
 
             return (
                 <div className="min-h-screen flex flex-col md:flex-row">
-                    <aside className="hidden md:flex flex-col w-72 bg-white border-r border-pink-100 p-6 h-screen sticky top-0 shadow-lg z-20">
-                        <h2 className="text-2xl font-serif font-bold text-pink-600 mb-10 text-center uppercase tracking-tighter">Wedding Planner</h2>
-                        <nav className="flex-1 space-y-2">
+                    <aside className="w-full md:w-72 bg-white border-b md:border-r border-rose-100 p-6 flex flex-col sticky top-0 h-auto md:h-screen z-20">
+                        <h2 className="text-xl font-serif font-bold text-rose-600 mb-8 text-center uppercase tracking-tighter">Wedding Planner</h2>
+                        <nav className="flex-1 space-y-1">
                             {(isAdmin ? [{ id: 'admin_panel', icon: 'ShieldCheck', label: 'Master Admin' }] : [
                                 { id: 'dashboard', icon: 'LayoutDashboard', label: 'Dashboard' },
                                 { id: 'seserahan', icon: 'Gift', label: 'Seserahan' },
                                 { id: 'tabungan', icon: 'PiggyBank', label: 'Tabungan' },
-                                { id: 'wo', icon: 'CalendarHeart', label: 'Vendor WO' },
-                                { id: 'pengaturan', icon: 'UserCircle', label: 'Akun & Keamanan' }
+                                { id: 'wo', icon: 'CalendarHeart', label: 'Vendor WO' }
                             ]).map(item => (
-                                <button key={item.id} onClick={() => setActiveMenu(item.id)} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${activeMenu === item.id ? 'bg-pink-100 text-pink-600 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}>
+                                <button key={item.id} onClick={() => setActiveMenu(item.id)} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${activeMenu === item.id ? 'bg-rose-100 text-rose-600 font-bold' : 'text-gray-400 hover:bg-rose-50'}`}>
                                     <Icon name={item.icon} /> {item.label}
                                 </button>
                             ))}
                         </nav>
-                        <button onClick={handleLogout} className="flex items-center justify-center gap-2 p-4 text-red-500 font-bold hover:bg-red-50 rounded-2xl transition-all"><Icon name="LogOut" /> Logout</button>
+                        <button onClick={handleLogout} className="flex items-center justify-center gap-2 p-4 text-rose-400 font-bold hover:bg-rose-50 rounded-2xl mt-4"><Icon name="LogOut" /> Keluar</button>
                     </aside>
-                    <main className="flex-1 p-6 md:p-10 custom-scrollbar overflow-y-auto">
-                        <div className="max-w-5xl mx-auto">
-                            {activeMenu === 'dashboard' && <Dashboard stats={{totalTabungan, rencanaAnggaran: appSettings.rencanaAnggaran, totalSeserahan, totalWO, dpWO}} name={appSettings.namaPasangan} currentClientId={currentClientId} db={db} />}
-                            {activeMenu === 'admin_panel' && <AdminPanel allClients={allClients} db={db} adminData={masterAdminData} onLogout={handleLogout} />}
+                    <main className="flex-1 p-6 md:p-10 overflow-y-auto custom-scrollbar">
+                        <div className="max-w-4xl mx-auto">
+                            {activeMenu === 'dashboard' && <Dashboard stats={{totalTabungan, target: settings.rencanaAnggaran, totalSeserahan, totalWO: wo.totalHarga, dpWO: wo.dpMasuk}} name={settings.namaPasangan} currentClientId={currentClientId} db={db} />}
+                            {activeMenu === 'admin_panel' && <AdminPanel allClients={clients} db={db} adminData={masterAdminData} onLogout={handleLogout} />}
                             {activeMenu === 'seserahan' && <Seserahan db={db} currentClientId={currentClientId} data={seserahan} />}
-                            {activeMenu === 'tabungan' && <Tabungan db={db} currentClientId={currentClientId} data={tabungan} target={appSettings.rencanaAnggaran} />}
-                            {activeMenu === 'wo' && <BookingWO db={db} currentClientId={currentClientId} data={woData} />}
-                            {activeMenu === 'pengaturan' && <PengaturanAkun db={db} loginUsername={loginUsername} setLoginUsername={setLoginUsername} onLogout={handleLogout} />}
+                            {activeMenu === 'tabungan' && <Tabungan db={db} currentClientId={currentClientId} data={tabungan} target={settings.rencanaAnggaran} />}
+                            {activeMenu === 'wo' && <BookingWO db={db} currentClientId={currentClientId} data={wo} />}
                         </div>
                     </main>
                 </div>
