@@ -3,315 +3,737 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wedding Planner - Master Platform</title>
+    <title>Our Wedding Planner</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & Babel CDN -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Lucide React Icons -->
-    <script src="https://unpkg.com/lucide-react"></script>
+    <!-- Google Fonts: Playfair Display for headings, Poppins for text -->
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Poppins', 'sans-serif'],
+                        serif: ['Playfair Display', 'serif'],
+                    },
+                    colors: {
+                        rose: {
+                            50: '#fff1f2',
+                            100: '#ffe4e6',
+                            200: '#fecdd3',
+                            300: '#fda4af',
+                            400: '#fb7185',
+                            500: '#f43f5e',
+                            600: '#e11d48',
+                            800: '#9f1239',
+                            900: '#881337',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;600;700&display=swap');
-        
-        body { font-family: 'Inter', sans-serif; background-color: #fff1f2; margin: 0; }
-        .font-serif { font-family: 'Playfair Display', serif; }
-        
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(244, 114, 182, 0.3); border-radius: 10px; }
-        
-        /* Animasi halu */
-        .fade-in { animation: fadeIn 0.5s ease-out; }
+        /* Custom scrollbar for modern look */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #fecdd3; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #fda4af; }
+        .glass-card { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(10px); }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
-<body>
-    <div id="root"></div>
+<body class="bg-gradient-to-br from-rose-50 via-white to-rose-100 min-h-screen text-gray-800 antialiased font-sans flex items-center justify-center">
 
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="fixed top-5 right-5 transform transition-transform duration-300 translate-x-[150%] bg-white border-l-4 border-rose-500 shadow-xl rounded-lg p-4 z-50 flex items-center gap-3">
+        <i data-lucide="info" class="text-rose-500"></i>
+        <span id="toastMsg" class="font-medium text-sm text-gray-700">Pesan</span>
+    </div>
 
-        // Simpan ke window agar bisa diakses oleh skrip Babel
-        window.FirebaseLib = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs };
-    </script>
+    <!-- LOADER -->
+    <div id="loader" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 hidden items-center justify-center flex-col">
+        <i data-lucide="loader-2" class="animate-spin text-rose-500 w-12 h-12 mb-3"></i>
+        <p class="text-rose-800 font-medium animate-pulse">Menyinkronkan Data...</p>
+    </div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+    <!-- ======================= -->
+    <!-- LOGIN VIEW              -->
+    <!-- ======================= -->
+    <div id="loginView" class="w-full max-w-md p-8 glass-card shadow-2xl shadow-rose-200 rounded-3xl border border-white fade-in">
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-rose-100 text-rose-500 mb-4">
+                <i data-lucide="heart" class="w-8 h-8 fill-rose-100"></i>
+            </div>
+            <h1 class="font-serif text-3xl font-bold text-rose-900">Our Journey</h1>
+            <p class="text-sm text-gray-500 mt-2">Wedding Planner & Organizer</p>
+        </div>
         
-        // --- DATA KONFIGURASI ---
-        // PENTING: Jika di GitHub, pastikan config ini terisi data asli Firebase Anda
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-            apiKey: "", 
-            authDomain: "", 
-            projectId: "", 
-            storageBucket: "", 
-            messagingSenderId: "", 
-            appId: ""
-        };
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'wedding-planner-robi';
-        const INITIAL_ADMIN_USER = "admin_wedding"; 
-        const INITIAL_ADMIN_PASS = "admin12345";
-
-        const KATEGORI_SESERAHAN = ["Alat Sholat", "Make Up", "Peralatan Mandi", "Pakaian", "Perhiasan", "Lainnya"];
-
-        // --- HELPERS ---
-        const formatRupiah = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
-        const formatInput = (v) => v.toString().replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-        const parseInput = (v) => Number(v.toString().replace(/\./g, ''));
-
-        // Komponen Ikon yang Aman (Tidak akan error jika Lucide belum load)
-        const Icon = ({ name, size = 20, className = "" }) => {
-            const lib = window.lucideReact || window.LucideReact;
-            if (!lib) return <div style={{width: size, height: size}} className="bg-gray-200 rounded-full animate-pulse" />;
-            const LucideIcon = lib[name];
-            return LucideIcon ? <LucideIcon size={size} className={className} /> : <span className="text-[8px]">?</span>;
-        };
-
-        const Card = ({ children, className = "" }) => (
-            <div className={`bg-white/80 backdrop-blur-sm border border-rose-100 rounded-[2rem] p-6 shadow-sm ${className}`}>{children}</div>
-        );
-
-        // ==========================================
-        // KOMPONEN LAYAR
-        // ==========================================
-
-        const Dashboard = ({ stats, name, currentClientId, db }) => {
-            const [localName, setLocalName] = useState(name || 'Pasangan Bahagia');
-            const [isEdit, setIsEdit] = useState(false);
-
-            const saveName = async () => {
-                const docRef = window.FirebaseLib.doc(db, 'artifacts', appId, 'public', 'data', 'client_settings', currentClientId);
-                await window.FirebaseLib.setDoc(docRef, { namaPasangan: localName }, { merge: true });
-                setIsEdit(false);
-            };
-
-            return (
-                <div className="space-y-6 fade-in">
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <p className="text-rose-400 text-xs font-bold uppercase tracking-widest">Jurnal Pernikahan</p>
-                            {isEdit ? (
-                                <div className="flex gap-2 mt-2">
-                                    <input value={localName} onChange={e => setLocalName(e.target.value)} className="border-b-2 border-rose-300 outline-none bg-transparent text-2xl font-serif" />
-                                    <button onClick={saveName} className="text-green-500"><Icon name="Check" /></button>
-                                </div>
-                            ) : (
-                                <div className="flex items-center gap-3 mt-2">
-                                    <h1 className="text-3xl font-serif font-bold text-rose-900">{localName}</h1>
-                                    <button onClick={() => setIsEdit(true)} className="text-rose-300"><Icon name="Edit3" size={18} /></button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="bg-gradient-to-br from-rose-400 to-pink-500 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
-                        <div className="relative z-10">
-                            <p className="text-rose-100 text-sm">Total Tabungan</p>
-                            <h2 className="text-4xl font-bold my-2">{formatRupiah(stats.totalTabungan)}</h2>
-                            <div className="mt-6">
-                                <div className="flex justify-between text-xs mb-2 font-bold">
-                                    <span>Target: {formatRupiah(stats.target)}</span>
-                                    <span>{((stats.totalTabungan/stats.target)*100 || 0).toFixed(1)}%</span>
-                                </div>
-                                <div className="h-2 bg-white/20 rounded-full overflow-hidden">
-                                    <div className="h-full bg-white transition-all duration-1000" style={{width: `${Math.min((stats.totalTabungan/stats.target)*100, 100)}%`}}></div>
-                                </div>
-                            </div>
-                        </div>
-                        <Icon name="Heart" size={150} className="absolute -right-10 -bottom-10 opacity-10 rotate-12" />
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                        <Card><p className="text-[10px] uppercase font-bold text-gray-400">Seserahan</p><p className="text-xl font-bold text-rose-900">{formatRupiah(stats.totalSeserahan)}</p></Card>
-                        <Card><p className="text-[10px] uppercase font-bold text-gray-400">Vendor WO</p><p className="text-xl font-bold text-rose-900">{formatRupiah(stats.totalWO)}</p></Card>
-                        <Card className="col-span-2 md:col-span-1"><p className="text-[10px] uppercase font-bold text-gray-400">Kekurangan</p><p className="text-xl font-bold text-rose-500">{formatRupiah(stats.totalWO - stats.dpWO)}</p></Card>
-                    </div>
+        <form id="loginForm" class="space-y-5">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                <div class="relative">
+                    <i data-lucide="user" class="absolute left-3 top-3 w-5 h-5 text-gray-400"></i>
+                    <input type="text" id="usernameInput" class="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-300 focus:border-rose-400 outline-none transition-all" placeholder="Masukkan username" required>
                 </div>
-            );
-        };
-
-        const AdminPanel = ({ allClients, db, adminData, onLogout }) => {
-            const [form, setForm] = useState({ username: '', password: '', licenseId: '', expiryDate: '', isActive: true });
-            const add = async (e) => {
-                e.preventDefault();
-                await window.FirebaseLib.addDoc(window.FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), form);
-                setForm({ username: '', password: '', licenseId: '', expiryDate: '', isActive: true });
-            };
-            return (
-                <div className="space-y-8 fade-in max-w-4xl mx-auto">
-                    <div className="flex justify-between items-center">
-                        <h1 className="text-2xl font-serif font-bold">Panel Master Admin</h1>
-                        <button onClick={onLogout} className="bg-rose-500 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md">Logout</button>
-                    </div>
-                    <Card className="border-rose-200">
-                        <h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="UserPlus" className="text-rose-500" /> Tambah Pelanggan</h3>
-                        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <input placeholder="Username" className="p-3 border rounded-xl" value={form.username} onChange={e => setForm({...form, username: e.target.value})} required />
-                            <input placeholder="Password" className="p-3 border rounded-xl" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
-                            <input placeholder="ID Lisensi" className="p-3 border rounded-xl" value={form.licenseId} onChange={e => setForm({...form, licenseId: e.target.value})} required />
-                            <input type="date" className="p-3 border rounded-xl" value={form.expiryDate} onChange={e => setForm({...form, expiryDate: e.target.value})} required />
-                            <button className="md:col-span-2 bg-rose-500 text-white p-4 rounded-xl font-bold">Aktifkan Lisensi</button>
-                        </form>
-                    </Card>
-                    <Card className="p-0 overflow-hidden">
-                        <table className="w-full text-left text-sm">
-                            <thead className="bg-rose-50 font-bold"><tr><th className="p-4">User</th><th className="p-4">Exp</th><th className="p-4 text-right">Aksi</th></tr></thead>
-                            <tbody>
-                                {allClients.map(c => (
-                                    <tr key={c.id} className="border-t">
-                                        <td className="p-4 font-bold">{c.username}</td>
-                                        <td className="p-4">{c.expiryDate}</td>
-                                        <td className="p-4 text-right"><Icon name={c.isActive ? "CheckCircle" : "XCircle"} className={c.isActive ? "text-green-500 ml-auto" : "text-gray-300 ml-auto"} /></td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </Card>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Password Akses</label>
+                <div class="relative">
+                    <i data-lucide="lock" class="absolute left-3 top-3 w-5 h-5 text-gray-400"></i>
+                    <input type="password" id="passwordInput" class="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-300 focus:border-rose-400 outline-none transition-all" placeholder="Masukkan password" required>
                 </div>
-            );
-        };
+                <p class="text-xs text-gray-400 mt-2">*Default akun awal: admin / admin123</p>
+            </div>
+            <button type="submit" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-medium py-3 rounded-xl transition-all shadow-lg shadow-rose-200 hover:shadow-rose-300">
+                Masuk ke Planner
+            </button>
+        </form>
+    </div>
 
-        // ==========================================
-        // ROOT APPLICATION
-        // ==========================================
-
-        function App() {
-            const [user, setUser] = useState(null);
-            const [isAuthReady, setIsAuthReady] = useState(false);
-            const [activeMenu, setActiveMenu] = useState('dashboard');
-            const [isLocked, setIsLocked] = useState(true);
-            const [isAdmin, setIsAdmin] = useState(false);
-            const [currentClientId, setCurrentClientId] = useState(null);
-            
-            const [masterAdminData, setMasterAdminData] = useState({ username: INITIAL_ADMIN_USER, password: INITIAL_ADMIN_PASS });
-            const [loginForm, setLoginForm] = useState({ u: '', p: '' });
-            const [loginError, setLoginError] = useState('');
-
-            // Wedding Data States
-            const [settings, setSettings] = useState({ namaPasangan: '', rencanaAnggaran: 100000000 });
-            const [seserahan, setSeserahan] = useState([]);
-            const [tabungan, setTabungan] = useState([]);
-            const [wo, setWo] = useState({ namaWO: '', totalHarga: 0, dpMasuk: 0 });
-            const [clients, setClients] = useState([]);
-
-            const { FirebaseLib } = window;
-            const app = FirebaseLib.initializeApp(firebaseConfig);
-            const auth = FirebaseLib.getAuth(app);
-            const db = FirebaseLib.getFirestore(app);
-
-            useEffect(() => {
-                const unsub = FirebaseLib.onAuthStateChanged(auth, (u) => { setUser(u); setIsAuthReady(true); });
-                FirebaseLib.signInAnonymously(auth).catch(err => console.error("Firebase Login Error. Check your Config!"));
-                return unsub;
-            }, []);
-
-            // Global Snapshots
-            useEffect(() => {
-                if (!user || !isAuthReady) return;
-                const adminRef = FirebaseLib.doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account');
-                return FirebaseLib.onSnapshot(adminRef, (d) => d.exists() && setMasterAdminData(d.data()));
-            }, [user, isAuthReady]);
-
-            useEffect(() => {
-                if (!user || !isAdmin || !isAuthReady) return;
-                const q = FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions');
-                return FirebaseLib.onSnapshot(q, (s) => setClients(s.docs.map(d => ({id: d.id, ...d.data()}))));
-            }, [user, isAdmin, isAuthReady]);
-
-            useEffect(() => {
-                if (!user || !currentClientId || isAdmin || !isAuthReady) return;
-                const p = (c) => FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', `${c}_${currentClientId}`);
-                const d = (c) => FirebaseLib.doc(db, 'artifacts', appId, 'public', 'data', c, currentClientId);
-
-                const u1 = FirebaseLib.onSnapshot(d('client_settings'), (snap) => snap.exists() && setSettings(snap.data()));
-                const u2 = FirebaseLib.onSnapshot(d('client_wo'), (snap) => snap.exists() && setWo(snap.data()));
-                const u3 = FirebaseLib.onSnapshot(p('seserahan'), (snap) => setSeserahan(snap.docs.map(x => ({id: x.id, ...x.data()}))));
-                const u4 = FirebaseLib.onSnapshot(p('tabungan'), (snap) => setTabungan(snap.docs.map(x => ({id: x.id, ...x.data()}))));
+    <!-- ======================= -->
+    <!-- MAIN DASHBOARD VIEW     -->
+    <!-- ======================= -->
+    <div id="mainView" class="hidden w-full h-screen max-w-[1440px] mx-auto flex flex-col md:flex-row overflow-hidden">
+        
+        <!-- SIDEBAR -->
+        <aside class="w-full md:w-64 bg-white/70 backdrop-blur-md border-r border-rose-100 flex flex-col justify-between shrink-0 h-auto md:h-full z-40 relative">
+            <div>
+                <div class="p-6 flex items-center gap-3 border-b border-rose-50 md:border-none">
+                    <div class="bg-gradient-to-br from-rose-400 to-rose-600 p-2 rounded-lg shadow-md shadow-rose-200 text-white">
+                        <i data-lucide="gem" class="w-5 h-5"></i>
+                    </div>
+                    <h2 class="font-serif font-bold text-xl text-rose-900 tracking-wide">Planner</h2>
+                    <!-- Mobile Menu Toggle -->
+                    <button id="mobileMenuBtn" class="md:hidden ml-auto text-rose-600"><i data-lucide="menu"></i></button>
+                </div>
                 
-                return () => { u1(); u2(); u3(); u4(); };
-            }, [user, currentClientId, isAdmin, isAuthReady]);
+                <nav id="navMenu" class="hidden md:flex flex-col gap-1 px-4 mt-4 pb-4">
+                    <button onclick="switchTab('dashboard')" class="nav-btn active flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-rose-900 bg-rose-100">
+                        <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
+                    </button>
+                    <button onclick="switchTab('seserahan')" class="nav-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-gray-600 hover:bg-rose-50 hover:text-rose-800">
+                        <i data-lucide="gift" class="w-5 h-5"></i> List Seserahan
+                    </button>
+                    <button onclick="switchTab('tabungan')" class="nav-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-gray-600 hover:bg-rose-50 hover:text-rose-800">
+                        <i data-lucide="wallet" class="w-5 h-5"></i> Tabungan
+                    </button>
+                    <button onclick="switchTab('wo')" class="nav-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-gray-600 hover:bg-rose-50 hover:text-rose-800">
+                        <i data-lucide="building-2" class="w-5 h-5"></i> Vendor / WO
+                    </button>
+                    <div class="my-2 border-t border-rose-100"></div>
+                    <button onclick="switchTab('password')" class="nav-btn flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-gray-600 hover:bg-rose-50 hover:text-rose-800">
+                        <i data-lucide="key-round" class="w-5 h-5"></i> Ganti Password
+                    </button>
+                </nav>
+            </div>
+            
+            <div class="hidden md:block p-4 mt-auto">
+                <button onclick="logout()" class="w-full flex justify-center items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all">
+                    <i data-lucide="log-out" class="w-4 h-4"></i> Keluar
+                </button>
+            </div>
+        </aside>
 
-            const handleLogin = async (e) => {
-                e.preventDefault();
-                setLoginError('');
-                if (loginForm.u === masterAdminData.username && loginForm.p === masterAdminData.password) {
-                    setIsAdmin(true); setIsLocked(false); setActiveMenu('admin_panel');
-                    return;
-                }
-                const q = FirebaseLib.query(FirebaseLib.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), FirebaseLib.where("username", "==", loginForm.u), FirebaseLib.where("password", "==", loginForm.p));
-                const snap = await FirebaseLib.getDocs(q);
-                if (!snap.empty) {
-                    const data = snap.docs[0].data();
-                    if (!data.isActive || new Date() > new Date(data.expiryDate)) {
-                        setLoginError('Akun tidak aktif atau masa berlaku habis.');
-                    } else {
-                        setCurrentClientId(data.licenseId); setIsAdmin(false); setIsLocked(false); setActiveMenu('dashboard');
-                    }
-                } else { setLoginError('Username atau Password salah.'); }
-            };
+        <!-- MAIN CONTENT AREA -->
+        <main class="flex-1 h-full overflow-y-auto p-4 md:p-8">
+            
+            <!-- 1. DASHBOARD -->
+            <section id="tab-dashboard" class="tab-content fade-in">
+                <h1 class="font-serif text-3xl font-bold text-rose-900 mb-2">Ringkasan Pernikahan</h1>
+                <p class="text-gray-500 mb-8">Pantau kesiapan dana dan kebutuhan acara spesialmu.</p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <!-- Cards -->
+                    <div class="glass-card p-6 rounded-2xl shadow-sm border border-white relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 w-24 h-24 bg-rose-100 rounded-full opacity-50"></div>
+                        <div class="flex items-center gap-4 mb-4 relative z-10">
+                            <div class="bg-emerald-100 p-3 rounded-xl text-emerald-600"><i data-lucide="wallet"></i></div>
+                            <h3 class="font-medium text-gray-600">Tabungan Terkumpul</h3>
+                        </div>
+                        <h2 class="text-3xl font-bold text-gray-800" id="dash-tabungan">Rp 0</h2>
+                    </div>
 
-            if (!isAuthReady) return <div className="h-screen flex items-center justify-center font-bold text-rose-400">MEMULAI SISTEM...</div>;
-
-            if (isLocked) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center p-4 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
-                        <div className="w-full max-w-sm fade-in">
-                            <Card className="shadow-2xl p-10 text-center">
-                                <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-6 text-rose-500"><Icon name="Lock" size={40} /></div>
-                                <h1 className="text-2xl font-serif font-bold text-rose-900 mb-8 uppercase tracking-widest">Wedding Access</h1>
-                                <form onSubmit={handleLogin} className="space-y-4">
-                                    <input placeholder="Username" className="w-full p-4 rounded-2xl border outline-none text-center" value={loginForm.u} onChange={e => setLoginForm({...loginForm, u: e.target.value})} required />
-                                    <input type="password" placeholder="Password" className="w-full p-4 rounded-2xl border outline-none text-center tracking-widest" value={loginForm.p} onChange={e => setLoginForm({...loginForm, p: e.target.value})} required />
-                                    {loginError && <p className="text-rose-500 text-xs font-bold">{loginError}</p>}
-                                    <button className="w-full bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg hover:scale-105 transition-transform">Masuk Aplikasi</button>
-                                </form>
-                            </Card>
+                    <div class="glass-card p-6 rounded-2xl shadow-sm border border-white relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 w-24 h-24 bg-rose-100 rounded-full opacity-50"></div>
+                        <div class="flex items-center gap-4 mb-4 relative z-10">
+                            <div class="bg-blue-100 p-3 rounded-xl text-blue-600"><i data-lucide="target"></i></div>
+                            <h3 class="font-medium text-gray-600">Rencana Anggaran</h3>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-3xl font-bold text-gray-800" id="dash-anggaran">Rp 0</h2>
+                            <button onclick="editAnggaran()" class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-600">Edit</button>
                         </div>
                     </div>
-                );
-            }
 
-            const totalTabungan = tabungan.reduce((s, i) => s + Number(i.jumlah || 0), 0);
-            const totalSeserahan = seserahan.reduce((s, i) => s + Number(i.harga || 0), 0);
-
-            return (
-                <div className="min-h-screen flex flex-col md:flex-row">
-                    <aside className="w-full md:w-72 bg-white border-b md:border-r border-rose-100 p-6 flex flex-col sticky top-0 h-auto md:h-screen z-20">
-                        <h2 className="text-xl font-serif font-bold text-rose-600 mb-8 text-center uppercase tracking-tighter">Wedding Planner</h2>
-                        <nav className="flex-1 space-y-1">
-                            {(isAdmin ? [{ id: 'admin_panel', icon: 'ShieldCheck', label: 'Master Admin' }] : [
-                                { id: 'dashboard', icon: 'LayoutDashboard', label: 'Dashboard' },
-                                { id: 'seserahan', icon: 'Gift', label: 'Seserahan' },
-                                { id: 'tabungan', icon: 'PiggyBank', label: 'Tabungan' },
-                                { id: 'wo', icon: 'CalendarHeart', label: 'Vendor WO' }
-                            ]).map(item => (
-                                <button key={item.id} onClick={() => setActiveMenu(item.id)} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${activeMenu === item.id ? 'bg-rose-100 text-rose-600 font-bold' : 'text-gray-400 hover:bg-rose-50'}`}>
-                                    <Icon name={item.icon} /> {item.label}
-                                </button>
-                            ))}
-                        </nav>
-                        <button onClick={handleLogout} className="flex items-center justify-center gap-2 p-4 text-rose-400 font-bold hover:bg-rose-50 rounded-2xl mt-4"><Icon name="LogOut" /> Keluar</button>
-                    </aside>
-                    <main className="flex-1 p-6 md:p-10 overflow-y-auto custom-scrollbar">
-                        <div className="max-w-4xl mx-auto">
-                            {activeMenu === 'dashboard' && <Dashboard stats={{totalTabungan, target: settings.rencanaAnggaran, totalSeserahan, totalWO: wo.totalHarga, dpWO: wo.dpMasuk}} name={settings.namaPasangan} currentClientId={currentClientId} db={db} />}
-                            {activeMenu === 'admin_panel' && <AdminPanel allClients={clients} db={db} adminData={masterAdminData} onLogout={handleLogout} />}
-                            {activeMenu === 'seserahan' && <Seserahan db={db} currentClientId={currentClientId} data={seserahan} />}
-                            {activeMenu === 'tabungan' && <Tabungan db={db} currentClientId={currentClientId} data={tabungan} target={settings.rencanaAnggaran} />}
-                            {activeMenu === 'wo' && <BookingWO db={db} currentClientId={currentClientId} data={wo} />}
+                    <div class="glass-card p-6 rounded-2xl shadow-sm border border-white relative overflow-hidden">
+                        <div class="absolute -right-4 -top-4 w-24 h-24 bg-rose-100 rounded-full opacity-50"></div>
+                        <div class="flex items-center gap-4 mb-4 relative z-10">
+                            <div class="bg-rose-100 p-3 rounded-xl text-rose-600"><i data-lucide="calculator"></i></div>
+                            <h3 class="font-medium text-gray-600">Total Pengeluaran (Estimasi)</h3>
                         </div>
-                    </main>
+                        <h2 class="text-3xl font-bold text-rose-600" id="dash-pengeluaran">Rp 0</h2>
+                    </div>
+
+                    <div class="glass-card p-6 rounded-2xl shadow-sm border border-white flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-500 mb-1">Total Biaya Seserahan</p>
+                            <h3 class="text-xl font-bold text-gray-800" id="dash-seserahan">Rp 0</h3>
+                        </div>
+                        <div class="bg-pink-50 p-3 rounded-full text-pink-500"><i data-lucide="gift"></i></div>
+                    </div>
+
+                    <div class="glass-card p-6 rounded-2xl shadow-sm border border-white flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-500 mb-1">Total Biaya WO</p>
+                            <h3 class="text-xl font-bold text-gray-800" id="dash-wo">Rp 0</h3>
+                        </div>
+                        <div class="bg-purple-50 p-3 rounded-full text-purple-500"><i data-lucide="building-2"></i></div>
+                    </div>
+
+                    <div class="glass-card p-6 rounded-2xl shadow-sm border border-white flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-500 mb-1">DP WO Terbayar</p>
+                            <h3 class="text-xl font-bold text-emerald-600" id="dash-dp">Rp 0</h3>
+                        </div>
+                        <div class="bg-emerald-50 p-3 rounded-full text-emerald-500"><i data-lucide="check-circle-2"></i></div>
+                    </div>
                 </div>
-            );
+            </section>
+
+            <!-- 2. SESERAHAN -->
+            <section id="tab-seserahan" class="tab-content hidden fade-in">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <div>
+                        <h1 class="font-serif text-3xl font-bold text-rose-900">List Seserahan</h1>
+                        <p class="text-gray-500 mt-1">Daftar barang kebutuhan untuk seserahan.</p>
+                    </div>
+                    <button onclick="toggleModal('modalSeserahan')" class="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 shadow-lg shadow-rose-200 transition-all">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Tambah Item
+                    </button>
+                </div>
+                
+                <div class="glass-card rounded-2xl shadow-sm border border-white overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-rose-50/50 text-rose-900 border-b border-rose-100">
+                                <th class="p-4 font-semibold text-sm">Nama Kebutuhan</th>
+                                <th class="p-4 font-semibold text-sm">Kategori</th>
+                                <th class="p-4 font-semibold text-sm">Harga</th>
+                                <th class="p-4 font-semibold text-sm">Link</th>
+                                <th class="p-4 font-semibold text-sm">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-seserahan" class="text-sm divide-y divide-gray-100">
+                            <!-- Injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 3. TABUNGAN -->
+            <section id="tab-tabungan" class="tab-content hidden fade-in">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <div>
+                        <h1 class="font-serif text-3xl font-bold text-rose-900">Data Tabungan</h1>
+                        <p class="text-gray-500 mt-1">Rekam jejak dana yang disisihkan bersama.</p>
+                    </div>
+                    <button onclick="toggleModal('modalTabungan')" class="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 shadow-lg shadow-rose-200 transition-all">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Tambah Tabungan
+                    </button>
+                </div>
+                
+                <div class="glass-card rounded-2xl shadow-sm border border-white overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-emerald-50/50 text-emerald-900 border-b border-emerald-100">
+                                <th class="p-4 font-semibold text-sm">Tanggal</th>
+                                <th class="p-4 font-semibold text-sm">Nama Penabung</th>
+                                <th class="p-4 font-semibold text-sm text-right">Jumlah Uang</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-tabungan" class="text-sm divide-y divide-gray-100">
+                            <!-- Injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 4. WO / VENDOR -->
+            <section id="tab-wo" class="tab-content hidden fade-in">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <div>
+                        <h1 class="font-serif text-3xl font-bold text-rose-900">Booking Organizer</h1>
+                        <p class="text-gray-500 mt-1">Kelola data vendor dan Wedding Organizer.</p>
+                    </div>
+                    <button onclick="toggleModal('modalWO')" class="bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 shadow-lg shadow-rose-200 transition-all">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Tambah WO
+                    </button>
+                </div>
+                
+                <div class="glass-card rounded-2xl shadow-sm border border-white overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-purple-50/50 text-purple-900 border-b border-purple-100">
+                                <th class="p-4 font-semibold text-sm">Nama Vendor / WO</th>
+                                <th class="p-4 font-semibold text-sm text-right">Total Harga</th>
+                                <th class="p-4 font-semibold text-sm text-right">DP Masuk</th>
+                                <th class="p-4 font-semibold text-sm text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-wo" class="text-sm divide-y divide-gray-100">
+                            <!-- Injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 5. PASSWORD -->
+            <section id="tab-password" class="tab-content hidden fade-in">
+                <h1 class="font-serif text-3xl font-bold text-rose-900 mb-6">Ganti Password</h1>
+                <div class="glass-card max-w-md p-6 rounded-2xl shadow-sm border border-white">
+                    <form id="formGantiPassword" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Password Baru</label>
+                            <input type="password" id="newPass" class="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-300 outline-none" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Konfirmasi Password</label>
+                            <input type="password" id="confirmPass" class="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-300 outline-none" required>
+                        </div>
+                        <button type="submit" class="w-full bg-rose-500 text-white font-medium py-2.5 rounded-xl hover:bg-rose-600 transition-all">Simpan Password</button>
+                    </form>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- ======================= -->
+    <!-- MODALS                  -->
+    <!-- ======================= -->
+    
+    <!-- Modal Seserahan -->
+    <div id="modalSeserahan" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative fade-in">
+            <button onclick="toggleModal('modalSeserahan')" class="absolute top-4 right-4 text-gray-400 hover:text-rose-500"><i data-lucide="x"></i></button>
+            <h3 class="font-serif text-xl font-bold text-rose-900 mb-4">Tambah Seserahan</h3>
+            <form id="formSeserahan" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Nama Kebutuhan</label>
+                    <input type="text" id="srNama" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-rose-300 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Kategori</label>
+                    <select id="srKategori" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-rose-300 outline-none" required>
+                        <option value="" disabled selected>Pilih Kategori</option>
+                        <option value="Perangkat Alat Sholat">Perangkat Alat Sholat</option>
+                        <option value="Make Up & Skin Care">Make Up & Skin Care</option>
+                        <option value="Peralatan Mandi">Peralatan Mandi</option>
+                        <option value="Pakaian Dalam">Pakaian Dalam</option>
+                        <option value="Pakaian Luar">Pakaian Luar</option>
+                        <option value="Perhiasan">Perhiasan</option>
+                        <option value="Tambahan">Tambahan</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Harga Estimasi/Asli (Rp)</label>
+                    <input type="number" id="srHarga" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-rose-300 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Link Checkout (Opsional)</label>
+                    <input type="url" id="srLink" placeholder="https://shopee..." class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-rose-300 outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Status</label>
+                    <select id="srStatus" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-rose-300 outline-none">
+                        <option value="On Progress">On Progress (Belum Dibeli)</option>
+                        <option value="Selesai">Selesai (Sudah Dibeli)</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full bg-rose-500 text-white py-2.5 rounded-xl font-medium mt-2">Simpan Seserahan</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Tabungan -->
+    <div id="modalTabungan" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative fade-in">
+            <button onclick="toggleModal('modalTabungan')" class="absolute top-4 right-4 text-gray-400 hover:text-rose-500"><i data-lucide="x"></i></button>
+            <h3 class="font-serif text-xl font-bold text-emerald-900 mb-4">Tambah Tabungan</h3>
+            <form id="formTabungan" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Tanggal Masuk</label>
+                    <input type="date" id="tbTanggal" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-emerald-300 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Nama Penabung</label>
+                    <input type="text" id="tbNama" placeholder="Misal: Calon Suami / Istri" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-emerald-300 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Jumlah Uang (Rp)</label>
+                    <input type="number" id="tbJumlah" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-emerald-300 outline-none" required>
+                </div>
+                <button type="submit" class="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium mt-2">Simpan Tabungan</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal WO -->
+    <div id="modalWO" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative fade-in">
+            <button onclick="toggleModal('modalWO')" class="absolute top-4 right-4 text-gray-400 hover:text-rose-500"><i data-lucide="x"></i></button>
+            <h3 class="font-serif text-xl font-bold text-purple-900 mb-4">Tambah Vendor / WO</h3>
+            <form id="formWO" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Nama Vendor / WO</label>
+                    <input type="text" id="woNama" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-purple-300 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Total Harga Deal (Rp)</label>
+                    <input type="number" id="woTotal" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-purple-300 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">DP Masuk (Rp)</label>
+                    <input type="number" id="woDP" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-purple-300 outline-none" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Status Pembayaran</label>
+                    <select id="woStatus" class="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-purple-300 outline-none">
+                        <option value="Belum Lunas">Belum Lunas</option>
+                        <option value="Lunas">Lunas</option>
+                    </select>
+                </div>
+                <button type="submit" class="w-full bg-purple-500 text-white py-2.5 rounded-xl font-medium mt-2">Simpan Vendor</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Script Application Logic -->
+    <script>
+        // KONFIGURASI BACKEND 
+        // ==========================================
+        // GANTI STRING DI BAWAH DENGAN URL WEB APP GOOGLE APPS SCRIPT ANDA
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbwPySqgMMfYYZnPJ2BHThcvAOZ_jMRaNdaxh-pNngb7JpVvncttkSsc-n_OosLu7q-z/exec"; 
+        // ==========================================
+
+        // INISIALISASI ICONS
+        lucide.createIcons();
+
+        // State Global
+        let isOfflineMode = GAS_URL === "URL_WEB_APP_ANDA_DISINI";
+
+        // Formater Uang
+        const formatRp = (angka) => {
+            return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka);
+        }
+        
+        // Formater Tanggal
+        const formatDate = (dateString) => {
+            if(!dateString) return '-';
+            const d = new Date(dateString);
+            return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        // Tampilkan Toast Message
+        const showToast = (msg, isError = false) => {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            
+            if(isError) {
+                toast.classList.replace('border-rose-500', 'border-red-500');
+                toast.querySelector('i').setAttribute('data-lucide', 'alert-circle');
+                toast.querySelector('i').classList.replace('text-rose-500', 'text-red-500');
+            } else {
+                toast.classList.replace('border-red-500', 'border-rose-500');
+                toast.querySelector('i').setAttribute('data-lucide', 'check-circle');
+                toast.querySelector('i').classList.replace('text-red-500', 'text-rose-500');
+            }
+            lucide.createIcons();
+
+            toast.classList.remove('translate-x-[150%]');
+            setTimeout(() => { toast.classList.add('translate-x-[150%]'); }, 3000);
+        }
+
+        const showLoader = (show) => {
+            document.getElementById('loader').style.display = show ? 'flex' : 'none';
+        }
+
+        // --- SISTEM LOGIN ---
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const user = document.getElementById('usernameInput').value;
+            const pass = document.getElementById('passwordInput').value;
+            
+            if(isOfflineMode) {
+                // Mode Demo/Offline jika URL belum di set
+                if(user === 'admin' && (pass === 'admin123' || pass === 'admin')) {
+                    proceedLogin();
+                } else {
+                    showToast('Username atau Password demo salah (Gunakan: admin / admin123)', true);
+                }
+                return;
+            }
+
+            showLoader(true);
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'login', data: { username: user, password: pass } })
+                });
+                const result = await res.json();
+                if(result.status === 'success' && result.data.loggedIn) {
+                    proceedLogin();
+                } else {
+                    showToast(result.message, true);
+                }
+            } catch (err) {
+                showToast('Gagal terhubung ke server.', true);
+            }
+            showLoader(false);
+        });
+
+        const proceedLogin = () => {
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('mainView').classList.remove('hidden');
+            loadAllData();
+        }
+
+        const logout = () => {
+            document.getElementById('mainView').classList.add('hidden');
+            document.getElementById('loginView').classList.remove('hidden');
+            document.getElementById('usernameInput').value = '';
+            document.getElementById('passwordInput').value = '';
+        }
+
+        // --- NAVIGASI TAB ---
+        const switchTab = (tabId) => {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            // Show selected
+            document.getElementById('tab-' + tabId).classList.remove('hidden');
+            
+            // Update Active Menu State
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('bg-rose-100', 'text-rose-900', 'active');
+                btn.classList.add('text-gray-600', 'hover:bg-rose-50');
+            });
+            const activeBtn = Array.from(document.querySelectorAll('.nav-btn')).find(b => b.getAttribute('onclick').includes(tabId));
+            if(activeBtn) {
+                activeBtn.classList.remove('text-gray-600', 'hover:bg-rose-50');
+                activeBtn.classList.add('bg-rose-100', 'text-rose-900', 'active');
+            }
+
+            // Close mobile menu if open
+            const navMenu = document.getElementById('navMenu');
+            if(!navMenu.classList.contains('hidden') && window.innerWidth < 768) {
+                navMenu.classList.add('hidden');
+            }
+        }
+
+        // Mobile Menu Toggle
+        document.getElementById('mobileMenuBtn').addEventListener('click', () => {
+            document.getElementById('navMenu').classList.toggle('hidden');
+        });
+
+        // --- MODAL HANDLER ---
+        const toggleModal = (modalId) => {
+            const modal = document.getElementById(modalId);
+            if(modal.classList.contains('hidden')) {
+                modal.classList.replace('hidden', 'flex');
+            } else {
+                modal.classList.replace('flex', 'hidden');
+                // Reset forms inside
+                const form = modal.querySelector('form');
+                if(form) form.reset();
+            }
+        }
+
+        // --- FETCH & LOAD DATA ---
+        let localData = { dashboard: {}, seserahan: [], tabungan: [], wo: [] }; // Fallback
+
+        const loadAllData = async () => {
+            if(isOfflineMode) return updateUI(localData); // Tampil kosong mode demo
+
+            showLoader(true);
+            try {
+                const res = await fetch(`${GAS_URL}?action=get_all_data`);
+                const result = await res.json();
+                if(result.status === 'success') {
+                    updateUI(result.data);
+                }
+            } catch (error) {
+                showToast('Gagal memuat data live', true);
+            }
+            showLoader(false);
+        }
+
+        const updateUI = (data) => {
+            // Update Dashboard
+            const db = data.dashboard || { totalTabungan:0, rencanaAnggaran:0, totalPengeluaran:0, totalSeserahan:0, totalWO:0, dpWO:0 };
+            document.getElementById('dash-tabungan').innerText = formatRp(db.totalTabungan);
+            document.getElementById('dash-anggaran').innerText = formatRp(db.rencanaAnggaran);
+            document.getElementById('dash-pengeluaran').innerText = formatRp(db.totalPengeluaran);
+            document.getElementById('dash-seserahan').innerText = formatRp(db.totalSeserahan);
+            document.getElementById('dash-wo').innerText = formatRp(db.totalWO);
+            document.getElementById('dash-dp').innerText = formatRp(db.dpWO);
+
+            // Cek status dana
+            const sisa = db.totalTabungan - db.totalPengeluaran;
+            const elPengeluaran = document.getElementById('dash-pengeluaran');
+            if(sisa < 0) { elPengeluaran.classList.replace('text-gray-800', 'text-rose-600'); } 
+            else { elPengeluaran.classList.replace('text-rose-600', 'text-gray-800'); }
+
+            // Update Tabel Seserahan
+            const tSR = document.getElementById('table-seserahan');
+            tSR.innerHTML = '';
+            (data.seserahan || []).forEach(item => {
+                const badgeClass = item.Status === 'Selesai' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700';
+                const link = item['Link Checkout'] ? `<a href="${item['Link Checkout']}" target="_blank" class="text-blue-500 hover:underline"><i data-lucide="external-link" class="w-4 h-4 inline"></i> Link</a>` : '-';
+                tSR.innerHTML += `
+                    <tr class="hover:bg-rose-50/30 transition-colors">
+                        <td class="p-4 font-medium text-gray-800">${item['Nama Kebutuhan']}</td>
+                        <td class="p-4 text-gray-600"><span class="px-2 py-1 bg-gray-100 rounded text-xs">${item.Kategori}</span></td>
+                        <td class="p-4 font-medium text-rose-600">${formatRp(item.Harga)}</td>
+                        <td class="p-4">${link}</td>
+                        <td class="p-4"><span class="px-3 py-1 rounded-full text-xs font-medium ${badgeClass}">${item.Status}</span></td>
+                    </tr>`;
+            });
+
+            // Update Tabel Tabungan
+            const tTB = document.getElementById('table-tabungan');
+            tTB.innerHTML = '';
+            (data.tabungan || []).forEach(item => {
+                tTB.innerHTML += `
+                    <tr class="hover:bg-emerald-50/30 transition-colors">
+                        <td class="p-4 text-gray-600">${formatDate(item.Tanggal)}</td>
+                        <td class="p-4 font-medium text-gray-800">${item.Nama}</td>
+                        <td class="p-4 font-bold text-emerald-600 text-right">${formatRp(item.Jumlah)}</td>
+                    </tr>`;
+            });
+
+            // Update Tabel WO
+            const tWO = document.getElementById('table-wo');
+            tWO.innerHTML = '';
+            (data.wo || []).forEach(item => {
+                const sClass = item.Status === 'Lunas' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700';
+                tWO.innerHTML += `
+                    <tr class="hover:bg-purple-50/30 transition-colors">
+                        <td class="p-4 font-medium text-gray-800">${item['Nama WO']}</td>
+                        <td class="p-4 text-right text-gray-600">${formatRp(item['Total Harga'])}</td>
+                        <td class="p-4 text-right font-medium text-emerald-600">${formatRp(item.DP)}</td>
+                        <td class="p-4 text-center"><span class="px-3 py-1 rounded-full text-xs font-medium ${sClass}">${item.Status}</span></td>
+                    </tr>`;
+            });
+            
+            lucide.createIcons();
+        }
+
+        // --- SUBMIT FORMS (POST TO BACKEND) ---
+        const submitData = async (action, payload, modalId) => {
+            if(isOfflineMode) {
+                showToast("Mode Demo: Data tidak disimpan. Tambahkan URL Backend terlebih dahulu.", true);
+                toggleModal(modalId);
+                return;
+            }
+
+            showLoader(true);
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: action, data: payload })
+                });
+                const result = await res.json();
+                if(result.status === 'success') {
+                    showToast('Berhasil disimpan!');
+                    toggleModal(modalId);
+                    loadAllData(); // Reload data
+                } else {
+                    showToast(result.message || 'Gagal menyimpan', true);
+                }
+            } catch(e) {
+                showToast('Terjadi kesalahan jaringan.', true);
+            }
+            showLoader(false);
+        }
+
+        document.getElementById('formSeserahan').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const data = {
+                nama: document.getElementById('srNama').value,
+                kategori: document.getElementById('srKategori').value,
+                harga: document.getElementById('srHarga').value,
+                link: document.getElementById('srLink').value,
+                status: document.getElementById('srStatus').value
+            };
+            submitData('save_seserahan', data, 'modalSeserahan');
+        });
+
+        document.getElementById('formTabungan').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const data = {
+                tanggal: document.getElementById('tbTanggal').value,
+                nama: document.getElementById('tbNama').value,
+                jumlah: document.getElementById('tbJumlah').value
+            };
+            submitData('save_tabungan', data, 'modalTabungan');
+        });
+
+        document.getElementById('formWO').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const data = {
+                nama_wo: document.getElementById('woNama').value,
+                total_harga: document.getElementById('woTotal').value,
+                dp: document.getElementById('woDP').value,
+                status: document.getElementById('woStatus').value
+            };
+            submitData('save_wo', data, 'modalWO');
+        });
+
+        document.getElementById('formGantiPassword').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const p1 = document.getElementById('newPass').value;
+            const p2 = document.getElementById('confirmPass').value;
+            if(p1 !== p2) {
+                showToast('Password tidak sama!', true); return;
+            }
+            
+            if(isOfflineMode) {
+                showToast("Mode Demo: Password tidak diubah.");
+                e.target.reset();
+                return;
+            }
+
+            showLoader(true);
+            try {
+                const res = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action: 'change_password', data: { newPassword: p1 } })
+                });
+                const result = await res.json();
+                showToast('Password berhasil diubah!');
+                e.target.reset();
+            } catch(err) {
+                showToast('Gagal merubah password', true);
+            }
+            showLoader(false);
+        });
+
+        const editAnggaran = () => {
+            const current = prompt("Masukkan jumlah Rencana Anggaran Pernikahan (Angka saja):", "50000000");
+            if(current && !isNaN(current)) {
+                if(isOfflineMode) {
+                    document.getElementById('dash-anggaran').innerText = formatRp(current);
+                    showToast("Mode Demo: Anggaran diubah lokal.");
+                    return;
+                }
+                submitData('update_anggaran', { anggaran: current }, ''); // '' karena tidak pakai modal
+            }
+        }
     </script>
 </body>
 </html>
