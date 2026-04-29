@@ -1,669 +1,461 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  LayoutDashboard, Gift, PiggyBank, CalendarHeart, 
-  LogOut, Menu, X, Plus, Trash2, Edit2, 
-  CheckCircle2, Clock, ExternalLink, Save, Lock, Edit3,
-  UserPlus, UserCircle, Eye, EyeOff, ShieldCheck, Users,
-  CalendarDays, Power, PowerOff, AlertCircle, KeyRound
-} from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { 
-  getFirestore, collection, doc, setDoc, getDoc, 
-  onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs
-} from 'firebase/firestore';
-
-// ============================================================
-// 1. KONFIGURASI AWAL (Hanya untuk akses pertama kali)
-// ============================================================
-const SPREADSHEET_URL = "https://script.google.com/macros/s/AKfycbxxuRJW8RLcCs_oQ_hiJ9RbUblT-srDnjAvXzfRFXqjGKbKD932Rr8g46uH01ogq38-/exec"; 
-const INITIAL_ADMIN_USER = "admin_wedding"; 
-const INITIAL_ADMIN_PASS = "admin12345";    
-// ============================================================
-
-// --- INISIALISASI FIREBASE ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'wedding-planner-master';
-
-// --- HELPER GLOBAL: SIMPAN KE SPREADSHEET ---
-const kirimKeSpreadsheet = async (tipe, dataObj) => {
-  if (!SPREADSHEET_URL || SPREADSHEET_URL.includes("URL_WEB_APP_ANDA")) return;
-  try {
-    await fetch(SPREADSHEET_URL, {
-      method: "POST",
-      mode: "no-cors", 
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ type: tipe, data: dataObj })
-    });
-  } catch (err) {
-    console.error("Gagal mengirim ke spreadsheet:", err);
-  }
-};
-
-const KATEGORI_SESERAHAN = [
-  "Perangkat Alat Sholat", "Make Up & Skin Care", "Peralatan Mandi",
-  "Pakaian Dalam", "Pakaian Outer", "Perhiasan", "Tambahan"
-];
-
-const formatNumberInput = (v) => {
-  if (!v) return '';
-  const s = v.toString().replace(/\D/g, '');
-  return s ? parseInt(s, 10).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '';
-};
-const parseNumberInput = (v) => v ? Number(v.toString().replace(/\./g, '')) : 0;
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [activeMenu, setActiveMenu] = useState('dashboard');
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // Auth & Session State
-  const [isLocked, setIsLocked] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [masterAdminData, setMasterAdminData] = useState({ username: INITIAL_ADMIN_USER, password: INITIAL_ADMIN_PASS });
-  const [currentClientId, setCurrentClientId] = useState(null);
-  
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
-
-  // Application Data States
-  const [appSettings, setAppSettings] = useState({ namaPasangan: '', rencanaAnggaran: 0 });
-  const [seserahan, setSeserahan] = useState([]);
-  const [tabungan, setTabungan] = useState([]);
-  const [woData, setWoData] = useState({ namaWO: '', totalHarga: 0, dpMasuk: 0, status: 'Survey' });
-  const [allClients, setAllClients] = useState([]);
-
-  // Otentikasi Awal
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Firebase auth error:", err);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setIsAuthReady(true);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Sync Kredensial Master Admin
-  useEffect(() => {
-    if (!user || !isAuthReady) return;
-    const adminRef = doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account');
-    const unsub = onSnapshot(adminRef, (d) => {
-      if (d.exists()) setMasterAdminData(d.data());
-    }, (err) => console.error("Admin snapshot error:", err));
-    return () => unsub();
-  }, [user, isAuthReady]);
-
-  // Listener untuk Admin (Daftar Pelanggan)
-  useEffect(() => {
-    if (!user || !isAdmin || !isAuthReady) return;
-    const clientsRef = collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions');
-    const unsub = onSnapshot(clientsRef, (s) => {
-      setAllClients(s.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.error("Clients snapshot error:", err));
-    return () => unsub();
-  }, [user, isAdmin, isAuthReady]);
-
-  // Listener untuk Pelanggan (Data Pernikahan)
-  useEffect(() => {
-    if (!user || !currentClientId || isAdmin || !isAuthReady) return;
-    
-    const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'client_settings', currentClientId);
-    const woRef = doc(db, 'artifacts', appId, 'public', 'data', 'client_wo', currentClientId);
-    const seserahanRef = collection(db, 'artifacts', appId, 'public', 'data', `seserahan_${currentClientId}`);
-    const tabunganRef = collection(db, 'artifacts', appId, 'public', 'data', `tabungan_${currentClientId}`);
-    
-    const unsubS = onSnapshot(settingsRef, (d) => d.exists() && setAppSettings(d.data()), (e) => console.error(e));
-    const unsubW = onSnapshot(woRef, (d) => d.exists() && setWoData(d.data()), (e) => console.error(e));
-    const unsubSes = onSnapshot(seserahanRef, (s) => setSeserahan(s.docs.map(d => ({id: d.id, ...d.data()}))), (e) => console.error(e));
-    const unsubTab = onSnapshot(tabunganRef, (s) => {
-      const d = s.docs.map(doc => ({id: doc.id, ...doc.data()}));
-      setTabungan(d.sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal)));
-    }, (e) => console.error(e));
-    
-    return () => { unsubS(); unsubW(); unsubSes(); unsubTab(); };
-  }, [user, currentClientId, isAdmin, isAuthReady]);
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-
-    // Cek Login Admin
-    if (loginUsername === masterAdminData.username && loginPassword === masterAdminData.password) {
-      setIsAdmin(true);
-      setIsLocked(false);
-      setActiveMenu('admin_panel');
-      return;
-    }
-
-    // Cek Login Pelanggan
-    try {
-      const q = query(
-        collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'),
-        where("username", "==", loginUsername),
-        where("password", "==", loginPassword)
-      );
-      const querySnapshot = await getDocs(q);
-
-      if (!querySnapshot.empty) {
-        const clientData = querySnapshot.docs[0].data();
-        const now = new Date();
-        const expDate = new Date(clientData.expiryDate || '1970-01-01');
-
-        if (!clientData.isActive) {
-          setLoginError('Akun Anda sedang dinonaktifkan oleh Admin.');
-          return;
-        }
-
-        if (now > expDate) {
-          setLoginError('Masa langganan Anda telah berakhir.');
-          return;
-        }
-
-        setCurrentClientId(clientData.licenseId);
-        setIsAdmin(false);
-        setIsLocked(false);
-        setActiveMenu('dashboard');
-      } else {
-        setLoginError('Username atau Password salah.');
-      }
-    } catch (err) {
-      setLoginError('Kesalahan sistem basis data.');
-    }
-  };
-
-  const handleLogout = () => {
-    setIsLocked(true);
-    setIsAdmin(false);
-    setCurrentClientId(null);
-    setLoginUsername('');
-    setLoginPassword('');
-    setLoginError('');
-  };
-
-  const formatRupiah = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
-  const totalTabungan = tabungan.reduce((sum, item) => sum + Number(item.jumlah || 0), 0);
-  const totalSeserahan = seserahan.reduce((sum, item) => sum + Number(item.harga || 0), 0);
-  const totalWO = Number(woData.totalHarga || 0);
-  const dpWO = Number(woData.dpMasuk || 0);
-  const rencanaAnggaran = Number(appSettings.rencanaAnggaran || 0);
-
-  if (!isAuthReady || !user) return <div className="min-h-screen flex items-center justify-center bg-pink-50 text-pink-400 font-semibold animate-pulse tracking-widest">MEMUAT SISTEM...</div>;
-
-  if (isLocked) {
-    return (
-      <div className="min-h-screen bg-[url('https://images.unsplash.com/photo-1518895949257-7621c3c786d7?q=80&w=2074&auto=format&fit=crop')] bg-cover bg-center flex items-center justify-center p-4">
-        <div className="absolute inset-0 bg-rose-950/40 backdrop-blur-md"></div>
-        <div className="relative z-10 w-full max-w-md bg-white/30 backdrop-blur-xl border border-white/40 p-10 rounded-[2.5rem] text-center shadow-2xl">
-          <div className="bg-rose-100/50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-rose-700 shadow-inner border border-white/50">
-            <Lock size={40} />
-          </div>
-          <h1 className="text-3xl font-serif font-bold text-rose-950 mb-2 tracking-widest">WEDDING ACCESS</h1>
-          <p className="text-rose-900/70 mb-8 text-sm font-medium">Silakan masuk untuk akses perencanaan Anda</p>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <input type="text" placeholder="Username" required className="w-full bg-white/60 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-rose-300 text-center font-medium" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} />
-            <div className="relative">
-              <input type={showLoginPassword ? "text" : "password"} placeholder="Password" required className="w-full bg-white/60 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-rose-300 text-center tracking-widest" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} />
-              <button type="button" onClick={() => setShowLoginPassword(!showLoginPassword)} className="absolute right-4 top-4 text-rose-700 opacity-60 hover:opacity-100">{showLoginPassword ? <EyeOff size={20}/> : <Eye size={20}/>}</button>
-            </div>
-            {loginError && <div className="flex items-center justify-center gap-2 text-rose-800 font-bold bg-white/80 rounded-xl py-3 px-4 text-xs shadow-sm"><AlertCircle size={16}/>{loginError}</div>}
-            <button className="w-full bg-rose-500 hover:bg-rose-600 text-white p-4 rounded-2xl font-bold shadow-lg transition-all active:scale-95">Masuk Sekarang</button>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  const navItems = isAdmin ? [
-    { id: 'admin_panel', icon: ShieldCheck, label: 'Panel Master Admin' }
-  ] : [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-    { id: 'seserahan', icon: Gift, label: 'Seserahan' },
-    { id: 'tabungan', icon: PiggyBank, label: 'Tabungan' },
-    { id: 'wo', icon: CalendarHeart, label: 'Vendor WO' },
-    { id: 'pengaturan', icon: UserCircle, label: 'Akun & Password' },
-  ];
-
-  return (
-    <div className="min-h-screen bg-[url('https://images.unsplash.com/photo-1518895949257-7621c3c786d7?q=80&w=2074&auto=format&fit=crop')] bg-cover bg-center bg-fixed font-sans">
-      <div className="absolute inset-0 bg-gradient-to-br from-pink-50/80 to-rose-100/70 backdrop-blur-[6px]"></div>
-      
-      {/* MOBILE NAV */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white/70 backdrop-blur-2xl border-b border-pink-100/50 p-4 flex justify-between items-center shadow-sm">
-        <h2 className="text-xl font-bold text-rose-900 font-serif">Wedding Planner</h2>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 bg-white/50 rounded-xl shadow-sm border border-pink-100/60 text-rose-900"><Menu size={24} /></button>
-      </div>
-
-      {/* OVERLAY MENU MOBILE */}
-      {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-40 bg-pink-50/95 backdrop-blur-3xl pt-24 pb-6 px-6 flex flex-col animate-in fade-in slide-in-from-right-4">
-          <nav className="flex-1 space-y-3">
-            {navItems.map((item) => (
-              <button key={item.id} onClick={() => { setActiveMenu(item.id); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all ${activeMenu === item.id ? 'bg-pink-200 text-pink-700 shadow-sm border border-pink-300 font-bold' : 'text-stone-700 bg-white/50 border border-white/60'}`}>
-                <item.icon size={24} /> <span className="text-lg">{item.label}</span>
-              </button>
-            ))}
-          </nav>
-          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl text-white bg-rose-500 font-bold shadow-md"><LogOut size={24} /> Logout</button>
-        </div>
-      )}
-
-      <div className="relative z-10 flex h-screen p-4 md:p-8 gap-6 overflow-hidden pt-20 md:pt-8">
-        {/* SIDEBAR DESKTOP */}
-        <aside className="hidden md:flex flex-col w-72 bg-white/50 backdrop-blur-2xl border border-pink-100/60 rounded-[2.5rem] p-6 shadow-xl">
-          <div className="mb-10 text-center">
-            <h2 className="text-2xl font-serif font-bold text-rose-900">{isAdmin ? 'Master' : 'Planner'}</h2>
-          </div>
-          <nav className="flex-1 space-y-2">
-            {navItems.map(i => (
-              <button key={i.id} onClick={() => setActiveMenu(i.id)} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${activeMenu === i.id ? 'bg-pink-200/80 text-pink-700 font-bold shadow-sm' : 'text-stone-600 hover:bg-pink-50'}`}>
-                <i.icon size={20}/> {i.label}
-              </button>
-            ))}
-          </nav>
-          <button onClick={handleLogout} className="flex items-center justify-center gap-2 p-4 text-rose-500 font-bold hover:bg-rose-50 rounded-2xl transition-all"><LogOut size={20}/> Logout</button>
-        </aside>
-
-        {/* AREA KONTEN */}
-        <main className="flex-1 bg-white/50 backdrop-blur-2xl rounded-[2.5rem] overflow-y-auto p-6 md:p-10 shadow-inner custom-scrollbar">
-          {isAdmin ? (
-             <AdminPanel allClients={allClients} db={db} appId={appId} adminData={masterAdminData} onLogout={handleLogout} />
-          ) : (
-            <ClientScreens activeMenu={activeMenu} commonProps={{db, format: formatRupiah, appId, currentClientId, user}} 
-              stats={{totalTabungan, rencanaAnggaran, totalSeserahan, totalWO, dpWO}} 
-              data={{seserahan, tabungan, woData, appSettings}} 
-              loginUsername={loginUsername} 
-              setLoginUsername={setLoginUsername}
-              onLogout={handleLogout} />
-          )}
-        </main>
-      </div>
-    </div>
-  );
-}
-
-// --- SUB KOMPONEN ---
-
-function GlassCard({ children, className = '' }) { 
-  return <div className={`bg-white/60 backdrop-blur-xl border border-pink-100/60 rounded-3xl p-6 shadow-sm ${className}`}>{children}</div>; 
-}
-
-// PANEL ADMIN
-function AdminPanel({ allClients, db, appId, adminData, onLogout }) {
-  const [clientForm, setClientForm] = useState({ username: '', password: '', licenseId: '', orderDate: new Date().toISOString().split('T')[0], expiryDate: '', isActive: true });
-  const [adminForm, setAdminForm] = useState({ ...adminData });
-  const [msg, setMsg] = useState('');
-
-  const handleUpdateAdmin = async () => {
-    try {
-      const adminRef = doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account');
-      await setDoc(adminRef, adminForm, { merge: true });
-      kirimKeSpreadsheet("Admin_Settings_Update", adminForm);
-      setMsg('Akun Master Admin diperbarui!');
-      setTimeout(() => setMsg(''), 3000);
-    } catch (e) { console.error(e); }
-  };
-
-  const handleAddClient = async (e) => {
-    e.preventDefault();
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), { ...clientForm });
-      kirimKeSpreadsheet("New_Subscription", clientForm);
-      setClientForm({ username: '', password: '', licenseId: '', orderDate: new Date().toISOString().split('T')[0], expiryDate: '', isActive: true });
-    } catch (e) { console.error(e); }
-  };
-
-  const toggleStatus = async (client) => {
-    try {
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'subscriptions', client.id);
-      await updateDoc(docRef, { isActive: !client.isActive });
-    } catch (e) { console.error(e); }
-  };
-
-  const deleteClient = async (id) => {
-    if(window.confirm("Hapus data pelanggan ini?")) {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'subscriptions', id));
-    }
-  }
-
-  return (
-    <div className="space-y-10 max-w-5xl mx-auto pb-10 animate-in fade-in duration-500">
-      <div className="flex justify-between items-center bg-white/40 p-6 rounded-3xl border border-white/60">
-        <h1 className="text-3xl font-serif font-bold text-rose-900">Panel Master Admin</h1>
-        <button onClick={onLogout} className="bg-rose-500 hover:bg-rose-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg transition-all active:scale-95">
-          <LogOut size={20} /> Logout Admin
-        </button>
-      </div>
-
-      <GlassCard className="border-rose-300 shadow-xl">
-        <h3 className="text-xl font-serif font-bold text-rose-900 mb-6 flex items-center gap-2"><ShieldCheck size={24} className="text-rose-500"/> Pengaturan Akses Master</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Username Admin</label><input type="text" className="w-full p-4 rounded-xl bg-white border border-rose-100 outline-none" value={adminForm.username} onChange={e => setAdminForm({...adminForm, username: e.target.value})} /></div>
-          <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Password Admin</label><input type="text" className="w-full p-4 rounded-xl bg-white border border-rose-100 outline-none" value={adminForm.password} onChange={e => setAdminForm({...adminForm, password: e.target.value})} /></div>
-        </div>
-        {msg && <p className="text-emerald-600 font-bold text-sm mt-4 text-center">{msg}</p>}
-        <button onClick={handleUpdateAdmin} className="mt-6 w-full bg-slate-800 text-white p-4 rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center gap-2 shadow-md"><Save size={20} /> Simpan Akses Admin</button>
-      </GlassCard>
-
-      <GlassCard className="border-pink-300 shadow-xl">
-        <h3 className="text-xl font-serif font-bold text-rose-900 mb-6 flex items-center gap-2"><UserPlus size={24} className="text-pink-500"/> Daftarkan Pembeli Baru</h3>
-        <form onSubmit={handleAddClient} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <input type="text" placeholder="Username Pembeli" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={clientForm.username} onChange={e => setClientForm({...clientForm, username: e.target.value})} />
-            <input type="text" placeholder="Password Pembeli" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={clientForm.password} onChange={e => setClientForm({...clientForm, password: e.target.value})} />
-            <input type="text" placeholder="License ID" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={clientForm.licenseId} onChange={e => setClientForm({...clientForm, licenseId: e.target.value})} />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Tanggal Mulai Order</label><input type="date" required className="w-full p-4 rounded-xl bg-white border border-pink-100" value={clientForm.orderDate} onChange={e => setClientForm({...clientForm, orderDate: e.target.value})} /></div>
-            <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Tanggal Masa Aktif Berakhir</label><input type="date" required className="w-full p-4 rounded-xl bg-white border border-pink-100" value={clientForm.expiryDate} onChange={e => setClientForm({...clientForm, expiryDate: e.target.value})} /></div>
-          </div>
-          <button className="w-full bg-rose-400 text-white p-4 rounded-xl font-bold shadow-lg hover:bg-rose-500 transition-all uppercase tracking-widest">Aktifkan Lisensi Pelanggan</button>
-        </form>
-      </GlassCard>
-
-      <GlassCard className="p-0 overflow-hidden shadow-xl border-pink-100">
-        <div className="p-6 bg-pink-50 border-b border-pink-100 flex justify-between items-center"><h3 className="font-serif font-bold text-rose-900 text-lg">Daftar Status Pelanggan</h3><span className="bg-white px-3 py-1 rounded-full text-xs font-bold text-pink-600 border border-pink-200">{allClients.length} Pelanggan Aktif</span></div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-pink-100/30 text-[10px] uppercase font-bold tracking-widest text-stone-500">
-              <tr><th className="p-5">Informasi Akun</th><th className="p-5">Masa Aktif</th><th className="p-5">Status</th><th className="p-5 text-right">Aksi</th></tr>
-            </thead>
-            <tbody>
-              {allClients.map(c => {
-                const isExpired = new Date() > new Date(c.expiryDate || '1970-01-01');
-                return (
-                  <tr key={c.id} className="border-t border-pink-50 transition-all hover:bg-white/40">
-                    <td className="p-5">
-                        <p className="font-bold text-stone-800">{c.username}</p>
-                        <p className="text-[10px] text-pink-400 font-mono tracking-tighter uppercase font-bold">License: {c.licenseId}</p>
-                    </td>
-                    <td className="p-5 text-xs">
-                        <p className="text-stone-400">Order: {c.orderDate}</p>
-                        <p className={`font-bold ${isExpired ? 'text-rose-600' : 'text-stone-600'}`}>Exp: {c.expiryDate}</p>
-                    </td>
-                    <td className="p-5"><span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${c.isActive && !isExpired ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>{isExpired ? 'Expired' : c.isActive ? 'Aktif' : 'Non-Aktif'}</span></td>
-                    <td className="p-5 text-right flex justify-end gap-2">
-                        <button onClick={() => toggleStatus(c)} title="Ubah Status" className={`p-2 rounded-lg border transition-all ${c.isActive ? 'text-amber-500 border-amber-100 bg-amber-50' : 'text-emerald-500 border-emerald-100 bg-emerald-50'}`}>{c.isActive ? <PowerOff size={18}/> : <Power size={18}/>}</button>
-                        <button onClick={() => deleteClient(c.id)} title="Hapus Pelanggan" className="p-2 text-rose-300 border border-rose-50 rounded-lg hover:bg-rose-50 hover:text-rose-600 transition-all"><Trash2 size={18} /></button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </GlassCard>
-    </div>
-  );
-}
-
-// SCREEN PELANGGAN
-function ClientScreens({ activeMenu, commonProps, stats, data, loginUsername, setLoginUsername, onLogout }) {
-  switch (activeMenu) {
-    case 'dashboard': return <Dashboard {...commonProps} stats={stats} name={data.appSettings.namaPasangan} />;
-    case 'seserahan': return <Seserahan {...commonProps} data={data.seserahan} />;
-    case 'tabungan': return <Tabungan {...commonProps} data={data.tabungan} target={stats.rencanaAnggaran} />;
-    case 'wo': return <BookingWO {...commonProps} data={data.woData} />;
-    case 'pengaturan': return <Pengaturan {...commonProps} loginUsername={loginUsername} setLoginUsername={setLoginUsername} onLogout={onLogout} />;
-    default: return null;
-  }
-}
-
-function Dashboard({ stats, name, format, db, appId, currentClientId }) {
-  const [val, setVal] = useState(name || 'Romeo & Juliet');
-  const [isEdit, setIsEdit] = useState(false);
-  useEffect(() => { if (name) setVal(name); }, [name]);
-
-  const save = async () => {
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'client_settings', currentClientId);
-    await setDoc(docRef, { namaPasangan: val }, { merge: true });
-    setIsEdit(false);
-  };
-  
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col items-center md:items-start text-center md:text-left">
-        <p className="text-pink-500 font-bold tracking-widest text-xs uppercase mb-1 drop-shadow-sm">Rencana Pernikahan</p>
-        <div className="flex items-center gap-4 mt-2">
-          {isEdit ? (
-            <div className="flex gap-2"><input type="text" value={val} onChange={e => setVal(e.target.value)} className="text-2xl font-serif p-2 rounded-xl bg-white border border-pink-200 outline-none w-full max-w-md shadow-inner"/><button onClick={save} className="bg-rose-400 text-white p-3 rounded-xl shadow-md active:scale-90 transition-all"><Save size={20}/></button></div>
-          ) : (
-            <div className="flex items-center gap-4"><h1 className="text-3xl md:text-6xl font-serif font-bold text-rose-950 leading-tight drop-shadow-sm">{val}</h1><button onClick={() => setIsEdit(true)} className="text-pink-300 hover:text-pink-600 transition-all"><Edit3 size={24}/></button></div>
-          )}
-        </div>
-      </div>
-      <GlassCard className="bg-gradient-to-br from-pink-400 to-rose-400 text-white border-none shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mt-10 -mr-10 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
-        <div className="flex justify-between items-end relative z-10">
-          <div><p className="text-white/80 text-xs uppercase font-bold mb-1 tracking-widest">Dana Terkumpul</p><h2 className="text-3xl md:text-5xl font-bold">{format(stats.totalTabungan)}</h2></div>
-          <div className="text-right"><p className="text-white/80 text-xs uppercase font-bold mb-1 tracking-widest">Target Anggaran</p><h3 className="text-xl md:text-2xl font-semibold">{format(stats.rencanaAnggaran)}</h3></div>
-        </div>
-        <div className="mt-8 bg-white/20 p-5 rounded-2xl backdrop-blur-md border border-white/10 relative z-10">
-          <div className="flex justify-between text-xs mb-2 font-bold uppercase tracking-wider"><span>Progress Pencapaian</span><span>{((stats.totalTabungan/stats.rencanaAnggaran)*100 || 0).toFixed(1)}%</span></div>
-          <div className="h-3 bg-black/10 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-white transition-all duration-1000 shadow-[0_0_15px_rgba(255,255,255,0.5)]" style={{width: `${(stats.totalTabungan/stats.rencanaAnggaran)*100}%`}}></div></div>
-        </div>
-      </GlassCard>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        <GlassCard className="hover:scale-[1.02] transition-all bg-white/80"><p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest mb-1">Seserahan</p><p className="text-2xl font-bold text-rose-900">{format(stats.totalSeserahan)}</p></GlassCard>
-        <GlassCard className="hover:scale-[1.02] transition-all bg-white/80"><p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest mb-1">Vendor WO</p><p className="text-2xl font-bold text-rose-900">{format(stats.totalWO)}</p></GlassCard>
-        <GlassCard className="hover:scale-[1.02] transition-all bg-white/80"><p className="text-[10px] text-stone-500 uppercase font-bold tracking-widest mb-1">Sisa Pelunasan</p><p className="text-2xl font-bold text-rose-600">{format(stats.totalWO - stats.dpWO)}</p></GlassCard>
-      </div>
-    </div>
-  );
-}
-
-function Seserahan({ db, appId, currentClientId, data, format }) {
-  const [form, setForm] = useState({ nama: '', harga: '', link: '', kategori: KATEGORI_SESERAHAN[0], status: 'On Progress' });
-  const [isAdd, setIsAdd] = useState(false);
-  const add = async (e) => {
-    e.preventDefault();
-    const final = { ...form, harga: parseNumberInput(form.harga) };
-    const colRef = collection(db, 'artifacts', appId, 'public', 'data', `seserahan_${currentClientId}`);
-    await addDoc(colRef, final);
-    kirimKeSpreadsheet("Client_Seserahan", { clientId: currentClientId, ...final });
-    setForm({ nama: '', harga: '', link: '', kategori: KATEGORI_SESERAHAN[0], status: 'On Progress' });
-    setIsAdd(false);
-  };
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center"><h1 className="text-3xl font-serif font-bold text-rose-900">Seserahan</h1><button onClick={() => setIsAdd(!isAdd)} className="bg-rose-400 text-white px-6 py-2.5 rounded-xl flex items-center gap-2 shadow-lg font-bold transition-all active:scale-95">{isAdd ? <X size={18}/> : <Plus size={18}/>} Tambah Barang</button></div>
-      {isAdd && (
-        <GlassCard className="animate-in slide-in-from-top-4 border-pink-200">
-          <form onSubmit={add} className="flex flex-col gap-4">
-            <select className="p-4 rounded-xl bg-white border border-pink-100 outline-none font-bold text-stone-600 focus:ring-2 focus:ring-pink-300 transition-all" value={form.kategori} onChange={e => setForm({...form, kategori: e.target.value})}>{KATEGORI_SESERAHAN.map(k => <option key={k} value={k}>{k}</option>)}</select>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input type="text" placeholder="Nama Barang" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} />
-              <input type="text" placeholder="Estimasi Harga (Rp)" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={form.harga} onChange={e => setForm({...form, harga: formatNumberInput(e.target.value)})} />
-            </div>
-            <input type="url" placeholder="Link Referensi Toko / Checkout" className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={form.link} onChange={e => setForm({...form, link: e.target.value})} />
-            <button className="bg-rose-400 text-white p-4 rounded-xl font-bold shadow-lg hover:bg-rose-500 transition-all">Simpan Barang</button>
-          </form>
-        </GlassCard>
-      )}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {data.map(item => (
-          <GlassCard key={item.id} className="relative group hover:border-pink-300 transition-all">
-            <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', `seserahan_${currentClientId}`, item.id))} className="absolute top-4 right-4 text-pink-200 hover:text-rose-500 p-2 transition-all"><Trash2 size={20}/></button>
-            <span className="text-[10px] bg-pink-50 text-pink-700 px-3 py-1 rounded-full font-bold uppercase mb-3 inline-block border border-pink-100 tracking-wider">{item.kategori}</span>
-            <h3 className="font-serif font-bold text-xl text-stone-800 mb-1">{item.nama}</h3>
-            <p className="text-rose-600 font-bold text-lg">{format(item.harga)}</p>
-            {item.link && <a href={item.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs text-rose-400 hover:text-rose-600 font-bold mt-4 bg-rose-50 px-3 py-2 rounded-xl border border-rose-100 shadow-sm"><ExternalLink size={14} /> Kunjungi Toko</a>}
-          </GlassCard>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Tabungan({ db, appId, currentClientId, data, format, target }) {
-  const [form, setForm] = useState({ tanggal: new Date().toISOString().split('T')[0], jumlah: '', nama: '' });
-  const [targetIn, setTargetIn] = useState(formatNumberInput(target));
-  const [isEdit, setIsEdit] = useState(false);
-  useEffect(() => { if (target) setTargetIn(formatNumberInput(target)); }, [target]);
-
-  const saveTarget = async () => {
-    const val = parseNumberInput(targetIn);
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'client_settings', currentClientId);
-    await setDoc(docRef, { rencanaAnggaran: val }, { merge: true });
-    setIsEdit(false);
-  };
-  
-  const add = async (e) => {
-    e.preventDefault();
-    const final = { ...form, jumlah: parseNumberInput(form.jumlah) };
-    const colRef = collection(db, 'artifacts', appId, 'public', 'data', `tabungan_${currentClientId}`);
-    await addDoc(colRef, final);
-    kirimKeSpreadsheet("Client_Tabungan", { clientId: currentClientId, ...final });
-    setForm({ ...form, jumlah: '', nama: '' });
-  };
-  
-  return (
-    <div className="space-y-6">
-      <GlassCard className="flex justify-between items-center shadow-lg border-pink-200">
-        <div><p className="text-[10px] uppercase text-stone-500 font-bold tracking-widest mb-1">Target Dana Utama</p>
-          {isEdit ? <div className="flex items-center gap-2 font-bold text-rose-900 text-2xl"><span>Rp</span><input type="text" value={targetIn} onChange={e => setTargetIn(formatNumberInput(e.target.value))} className="bg-white border-b-2 border-pink-400 outline-none w-48 text-center p-1 rounded-t-lg font-bold"/></div> : <p className="text-3xl font-serif font-bold text-rose-900">{format(target)}</p>}
-        </div>
-        <button onClick={isEdit ? saveTarget : () => setIsEdit(true)} className="p-3 bg-pink-50 text-pink-600 rounded-2xl shadow-sm border border-pink-100 hover:bg-pink-100 transition-all">{isEdit ? <Save size={24}/> : <Edit2 size={24}/>}</button>
-      </GlassCard>
-      <GlassCard className="border-pink-200"><h3 className="font-serif font-bold text-xl text-rose-900 mb-6 flex items-center gap-2"><PiggyBank size={24} className="text-pink-400"/> Masukkan Tabungan</h3>
-        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <input type="date" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={form.tanggal} onChange={e => setForm({...form, tanggal: e.target.value})} />
-          <input type="text" placeholder="Siapa yang setor?" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} />
-          <input type="text" placeholder="Jumlah Setoran (Rp)" required className="p-4 rounded-xl bg-white border border-pink-100 outline-none" value={form.jumlah} onChange={e => setForm({...form, jumlah: formatNumberInput(e.target.value)})} />
-          <button className="bg-rose-400 text-white p-4 rounded-xl font-bold md:col-span-3 hover:bg-rose-500 transition-all shadow-md active:scale-95 uppercase tracking-widest">Simpan Riwayat</button>
-        </form>
-      </GlassCard>
-      <GlassCard className="p-0 overflow-hidden shadow-lg border-pink-100 bg-white/80">
-        <table className="w-full text-left">
-          <thead className="bg-pink-50 text-[10px] uppercase font-bold tracking-widest border-b border-pink-100 text-stone-500"><tr><th className="p-5">Tanggal</th><th className="p-5">Nama</th><th className="p-5 text-right">Nominal</th><th className="p-5"></th></tr></thead>
-          <tbody>{data.map(item => (<tr key={item.id} className="border-t border-pink-50 hover:bg-white transition-all"><td className="p-5 text-xs text-stone-600">{item.tanggal}</td><td className="p-5 font-bold text-sm text-stone-800">{item.nama}</td><td className="p-5 text-right font-bold text-rose-600 text-base">{format(item.jumlah)}</td><td className="p-5 text-right"><button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', `tabungan_${currentClientId}`, item.id))} className="text-pink-200 hover:text-rose-500 p-2 transition-all active:scale-90"><Trash2 size={16}/></button></td></tr>))}</tbody>
-        </table>
-      </GlassCard>
-    </div>
-  );
-}
-
-function BookingWO({ db, appId, currentClientId, data, format }) {
-  const [f, setF] = useState({ namaWO: '', totalHarga: '', dpMasuk: '', status: 'Survey' });
-  const [edit, setEdit] = useState(false);
-  useEffect(() => { 
-    if (data) {
-      setF({ namaWO: data.namaWO || '', totalHarga: formatNumberInput(data.totalHarga), dpMasuk: formatNumberInput(data.dpMasuk), status: data.status || 'Survey' }); 
-      if (!data.namaWO) setEdit(true);
-    }
-  }, [data]);
-
-  const save = async () => {
-    const final = { ...f, totalHarga: parseNumberInput(f.totalHarga), dpMasuk: parseNumberInput(f.dpMasuk) };
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'client_wo', currentClientId);
-    await setDoc(docRef, final, { merge: true });
-    kirimKeSpreadsheet("Client_WO_Booking", { clientId: currentClientId, ...final });
-    setEdit(false);
-  };
-  
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center pb-4"><h1 className="text-3xl font-serif font-bold text-rose-900">Wedding Organizer</h1><button onClick={() => setEdit(!edit)} className="p-2 bg-white rounded-xl text-pink-600 shadow-sm border border-pink-100">{edit ? <X size={20}/> : <Edit2 size={20}/>}</button></div>
-      <GlassCard className="border-pink-200 shadow-xl bg-white/70">
-        {edit ? (
-          <div className="space-y-5 animate-in slide-in-from-bottom-4 duration-500">
-            <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Nama Vendor WO</label><input type="text" placeholder="Masukkan Nama WO Pilihan" className="w-full p-4 rounded-xl bg-white border border-pink-100 outline-none" value={f.namaWO} onChange={e => setF({...f, namaWO: e.target.value})} /></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-               <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Total Harga Paket</label><input type="text" placeholder="Rp" className="w-full p-4 rounded-xl bg-white border border-pink-100 outline-none font-bold" value={f.totalHarga} onChange={e => setF({...f, totalHarga: formatNumberInput(e.target.value)})} /></div>
-               <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Total DP Masuk</label><input type="text" placeholder="Rp" className="w-full p-4 rounded-xl bg-white border border-pink-100 outline-none font-bold" value={f.dpMasuk} onChange={e => setF({...f, dpMasuk: formatNumberInput(e.target.value)})} /></div>
-            </div>
-            <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2">Status Progress</label><select className="w-full p-4 rounded-xl bg-white border border-pink-100 outline-none font-bold text-stone-600" value={f.status} onChange={e => setF({...f, status: e.target.value})}><option value="Survey">Survey / Diskusi</option><option value="Booking Fee">Booking Fee / DP</option><option value="Lunas">Pelunasan Lunas</option></select></div>
-            <button onClick={save} className="w-full bg-rose-400 text-white p-4 rounded-xl font-bold shadow-lg hover:bg-rose-500 transition-all uppercase tracking-widest">Update Data Vendor</button>
-          </div>
-        ) : (
-          <div className="space-y-6 animate-in fade-in duration-500">
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4"><h2 className="text-4xl font-serif font-bold text-rose-950">{data.namaWO || 'Pilih WO Anda'}</h2><span className="bg-rose-50 text-rose-600 px-4 py-2 rounded-full font-bold text-xs border border-rose-100 uppercase tracking-widest">{data.status}</span></div>
-            <div className="grid grid-cols-2 gap-8 py-6 border-y border-pink-100">
-              <div><p className="text-[10px] text-stone-400 uppercase font-bold mb-1 tracking-widest">Harga Kontrak</p><p className="text-2xl font-bold text-stone-800">{format(data.totalHarga)}</p></div>
-              <div><p className="text-[10px] text-stone-400 uppercase font-bold mb-1 tracking-widest">Total Terbayar</p><p className="text-2xl font-bold text-emerald-600">{format(data.dpMasuk)}</p></div>
-            </div>
-            <div className="pt-4 text-center md:text-left"><p className="text-[10px] text-stone-400 uppercase font-bold mb-1 tracking-widest italic">Kekurangan Pelunasan</p><p className="text-5xl font-bold text-rose-600 drop-shadow-md">{format(data.totalHarga - data.dpMasuk)}</p></div>
-          </div>
-        )}
-      </GlassCard>
-    </div>
-  );
-}
-
-function Pengaturan({ db, appId, loginUsername, setLoginUsername, onLogout }) {
-  const [f, setF] = useState({ username: loginUsername, password: '' });
-  const [msg, setMsg] = useState('');
-  const [show, setShow] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const save = async () => {
-    if (!f.username) return;
-    setIsLoading(true);
-    try {
-      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), where("username", "==", loginUsername));
-      const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty) {
-        const docId = querySnapshot.docs[0].id;
-        const currentData = querySnapshot.docs[0].data();
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'subscriptions', docId);
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wedding Planner - Master Platform</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & Babel CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide React Icons -->
+    <script src="https://unpkg.com/lucide-react"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;600;700&display=swap');
         
-        await updateDoc(docRef, { 
-          username: f.username, 
-          password: f.password || currentData.password 
-        });
+        body { font-family: 'Inter', sans-serif; background-color: #fdf2f8; }
+        .font-serif { font-family: 'Playfair Display', serif; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(244, 114, 182, 0.2); border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-        // Update state lokal agar kueri selanjutnya tidak error
-        setLoginUsername(f.username);
-        setMsg('Data akses berhasil diperbarui!');
-        setTimeout(() => setMsg(''), 6000);
-      }
-    } catch (e) { 
-      console.error(e); 
-      setMsg('Gagal memperbarui data.'); 
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-  return (
-    <div className="max-w-md mx-auto space-y-10 py-10 animate-in fade-in duration-500">
-      <div className="text-center space-y-4">
-        <div className="bg-white/90 w-24 h-24 rounded-full flex items-center justify-center mx-auto text-pink-600 shadow-xl border-4 border-white"><UserCircle size={56}/></div>
-        <h1 className="text-3xl font-serif font-bold text-rose-900 tracking-widest uppercase">Akun Pembeli</h1>
-        <p className="text-stone-500 text-sm font-medium">Kelola akses masuk ke aplikasi Anda</p>
-      </div>
-      <GlassCard className="space-y-6 border-pink-200 shadow-2xl bg-white/80 p-8">
-        <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2 flex items-center gap-1"><UserCircle size={10}/> Ganti Username</label><input type="text" value={f.username} onChange={e => setF({...f, username: e.target.value})} className="w-full p-4 rounded-xl bg-white border border-pink-100 outline-none font-bold text-stone-700 shadow-sm focus:ring-2 focus:ring-pink-200" placeholder="Username" /></div>
-        <div className="space-y-1"><label className="text-[10px] uppercase font-bold text-stone-400 ml-2 flex items-center gap-1"><KeyRound size={10}/> Ganti Password</label><div className="relative">
-          <input type={show ? "text" : "password"} value={f.password} onChange={e => setF({...f, password: e.target.value})} className="w-full p-4 rounded-xl bg-white border border-pink-100 outline-none tracking-widest font-bold text-stone-700 shadow-sm focus:ring-2 focus:ring-pink-200" placeholder="Password Baru" />
-          <button onClick={() => setShow(!show)} className="absolute right-4 top-4 text-pink-300 hover:text-pink-600 transition-colors">{show ? <EyeOff size={24}/> : <Eye size={24}/>}</button>
-        </div></div>
-        {msg && <div className="text-emerald-600 text-center font-bold text-xs bg-emerald-50 py-3 rounded-xl border border-emerald-100 shadow-sm flex items-center justify-center gap-2 animate-bounce"><CheckCircle2 size={14}/>{msg}</div>}
-        <div className="flex flex-col gap-4 pt-4">
-            <button onClick={save} disabled={isLoading} className="w-full bg-rose-500 text-white p-4 rounded-2xl font-bold shadow-lg hover:bg-rose-600 transition-all uppercase tracking-widest active:scale-95 flex items-center justify-center gap-2">
-                {isLoading ? 'Menyimpan...' : <><Save size={20}/> Simpan Perubahan</>}
-            </button>
-            <div className="h-px bg-stone-100 my-2"></div>
-            <button onClick={onLogout} className="w-full bg-stone-100 text-rose-600 p-4 rounded-2xl font-bold border border-rose-100 hover:bg-rose-200/50 transition-all uppercase tracking-widest flex items-center justify-center gap-2 active:scale-95 shadow-sm"><LogOut size={20} /> Logout Dari Akun</button>
-        </div>
-      </GlassCard>
-      <p className="text-center text-[10px] text-stone-400 font-bold uppercase tracking-[0.2em] opacity-50">Wedding Planner Secure Platform</p>
-    </div>
-  );
-}
+        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, deleteDoc, updateDoc, query, where, getDocs };
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+        
+        // --- KONFIGURASI ---
+        const SPREADSHEET_URL = "https://script.google.com/macros/s/AKfycbxxuRJW8RLcCs_oQ_hiJ9RbUblT-srDnjAvXzfRFXqjGKbKD932Rr8g46uH01ogq38-/exec"; 
+        const INITIAL_ADMIN_USER = "admin_wedding"; 
+        const INITIAL_ADMIN_PASS = "admin12345";
+        
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: ""
+        };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'wedding-planner-master';
+
+        const KATEGORI_SESERAHAN = [
+            "Perangkat Alat Sholat", "Make Up & Skin Care", "Peralatan Mandi",
+            "Pakaian Dalam", "Pakaian Outer", "Perhiasan", "Tambahan"
+        ];
+
+        // Helpers
+        const formatRupiah = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(n || 0);
+        const formatNumberInput = (v) => {
+            if (!v) return '';
+            const s = v.toString().replace(/\D/g, '');
+            return s ? parseInt(s, 10).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '';
+        };
+        const parseNumberInput = (v) => v ? Number(v.toString().replace(/\./g, '')) : 0;
+
+        // Unified Icon Component - Fixes ReferenceError
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const LucideIcon = lucideReact[name];
+            return LucideIcon ? <LucideIcon size={size} className={className} /> : null;
+        };
+
+        const GlassCard = ({ children, className = '' }) => (
+            <div className={`bg-white/70 backdrop-blur-md border border-pink-100 rounded-3xl p-6 shadow-sm ${className}`}>{children}</div>
+        );
+
+        // ==========================================
+        // SUB-KOMPONEN APLIKASI
+        // ==========================================
+
+        const Dashboard = ({ stats, name, currentClientId, db }) => {
+            const [val, setVal] = useState(name || 'Romeo & Juliet');
+            const [isEdit, setIsEdit] = useState(false);
+            useEffect(() => { if (name) setVal(name); }, [name]);
+
+            const save = async () => {
+                const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'client_settings', currentClientId);
+                await window.FB.setDoc(docRef, { namaPasangan: val }, { merge: true });
+                setIsEdit(false);
+            };
+
+            return (
+                <div className="space-y-8 animate-in fade-in duration-500">
+                    <div className="flex flex-col items-center md:items-start">
+                        <p className="text-pink-500 font-bold tracking-widest text-xs uppercase mb-1">Rencana Pernikahan</p>
+                        <div className="flex items-center gap-4 mt-2">
+                            {isEdit ? (
+                                <div className="flex gap-2"><input type="text" value={val} onChange={e => setVal(e.target.value)} className="text-2xl font-serif p-2 rounded-xl bg-white border border-pink-200 outline-none"/><button onClick={save} className="bg-rose-400 text-white p-3 rounded-xl shadow-md"><Icon name="Save" /></button></div>
+                            ) : (
+                                <div className="flex items-center gap-4"><h1 className="text-3xl md:text-5xl font-serif font-bold text-gray-800">{val}</h1><button onClick={() => setIsEdit(true)} className="text-pink-300 hover:text-pink-500"><Icon name="Edit3" size={24}/></button></div>
+                            )}
+                        </div>
+                    </div>
+                    <GlassCard className="bg-gradient-to-br from-pink-400 to-rose-400 text-white border-none shadow-xl">
+                        <div className="flex justify-between items-end">
+                            <div><p className="text-white/80 text-xs uppercase font-bold mb-1">Tabungan</p><h2 className="text-3xl md:text-5xl font-bold">{formatRupiah(stats.totalTabungan)}</h2></div>
+                            <div className="text-right"><p className="text-white/80 text-xs uppercase font-bold mb-1">Target</p><h3 className="text-xl md:text-2xl font-semibold">{formatRupiah(stats.rencanaAnggaran)}</h3></div>
+                        </div>
+                        <div className="mt-8 bg-white/20 p-4 rounded-2xl">
+                            <div className="flex justify-between text-xs mb-2 font-bold uppercase"><span>Progres</span><span>{((stats.totalTabungan/stats.rencanaAnggaran)*100 || 0).toFixed(1)}%</span></div>
+                            <div className="h-3 bg-black/10 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-white transition-all duration-1000 shadow-lg" style={{width: `${(stats.totalTabungan/stats.rencanaAnggaran)*100}%`}}></div></div>
+                        </div>
+                    </GlassCard>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                        <GlassCard className="hover:scale-105 transition-all"><p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Seserahan</p><p className="text-2xl font-bold text-rose-900">{formatRupiah(stats.totalSeserahan)}</p></GlassCard>
+                        <GlassCard className="hover:scale-105 transition-all"><p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Vendor WO</p><p className="text-2xl font-bold text-rose-900">{formatRupiah(stats.totalWO)}</p></GlassCard>
+                        <GlassCard className="hover:scale-105 transition-all"><p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Sisa Bayar</p><p className="text-2xl font-bold text-rose-600">{formatRupiah(stats.totalWO - stats.dpWO)}</p></GlassCard>
+                    </div>
+                </div>
+            );
+        };
+
+        const Seserahan = ({ db, currentClientId, data }) => {
+            const [form, setForm] = useState({ nama: '', harga: '', kategori: KATEGORI_SESERAHAN[0] });
+            const add = async (e) => {
+                e.preventDefault();
+                await window.FB.addDoc(window.FB.collection(db, 'artifacts', appId, 'public', 'data', `seserahan_${currentClientId}`), { ...form, harga: parseNumberInput(form.harga) });
+                setForm({ nama: '', harga: '', kategori: KATEGORI_SESERAHAN[0] });
+            };
+            const del = async (id) => await window.FB.deleteDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', `seserahan_${currentClientId}`, id));
+
+            return (
+                <div className="space-y-6">
+                    <h1 className="text-3xl font-serif font-bold text-gray-800">Seserahan</h1>
+                    <GlassCard>
+                        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <input type="text" placeholder="Nama Barang" className="p-4 rounded-xl border outline-none" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} required />
+                            <input type="text" placeholder="Harga (Rp)" className="p-4 rounded-xl border outline-none" value={form.harga} onChange={e => setForm({...form, harga: formatNumberInput(e.target.value)})} required />
+                            <select className="p-4 rounded-xl border outline-none" value={form.kategori} onChange={e => setForm({...form, kategori: e.target.value})}>
+                                {KATEGORI_SESERAHAN.map(k => <option key={k} value={k}>{k}</option>)}
+                            </select>
+                            <button className="md:col-span-3 bg-pink-500 text-white p-4 rounded-xl font-bold">Simpan Seserahan</button>
+                        </form>
+                    </GlassCard>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {data.map(item => (
+                            <GlassCard key={item.id} className="relative group">
+                                <button onClick={() => del(item.id)} className="absolute top-4 right-4 text-gray-200 hover:text-red-500 transition-colors"><Icon name="Trash2" /></button>
+                                <span className="text-[10px] bg-pink-50 text-pink-600 px-3 py-1 rounded-full font-bold uppercase border border-pink-100">{item.kategori}</span>
+                                <h3 className="font-bold text-lg mt-2">{item.nama}</h3>
+                                <p className="text-rose-600 font-bold">{formatRupiah(item.harga)}</p>
+                            </GlassCard>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const Tabungan = ({ db, currentClientId, data, target }) => {
+            const [form, setForm] = useState({ tanggal: new Date().toISOString().split('T')[0], jumlah: '', nama: '' });
+            const add = async (e) => {
+                e.preventDefault();
+                await window.FB.addDoc(window.FB.collection(db, 'artifacts', appId, 'public', 'data', `tabungan_${currentClientId}`), { ...form, jumlah: parseNumberInput(form.jumlah) });
+                setForm({ ...form, jumlah: '', nama: '' });
+            };
+            return (
+                <div className="space-y-6">
+                    <h1 className="text-3xl font-serif font-bold text-gray-800">Tabungan</h1>
+                    <GlassCard>
+                        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <input type="date" className="p-4 rounded-xl border outline-none" value={form.tanggal} onChange={e => setForm({...form, tanggal: e.target.value})} />
+                            <input type="text" placeholder="Penyetor" className="p-4 rounded-xl border outline-none" value={form.nama} onChange={e => setForm({...form, nama: e.target.value})} required />
+                            <input type="text" placeholder="Jumlah (Rp)" className="p-4 rounded-xl border outline-none" value={form.jumlah} onChange={e => setForm({...form, jumlah: formatNumberInput(e.target.value)})} required />
+                            <button className="md:col-span-3 bg-pink-500 text-white p-4 rounded-xl font-bold">Catat Setoran</button>
+                        </form>
+                    </GlassCard>
+                    <GlassCard className="p-0 overflow-hidden">
+                        <table className="w-full text-left">
+                            <thead className="bg-pink-50 text-xs font-bold uppercase"><tr><th className="p-4">Tgl</th><th className="p-4">Nama</th><th className="p-4 text-right">Jumlah</th></tr></thead>
+                            <tbody>
+                                {data.map(item => (
+                                    <tr key={item.id} className="border-t hover:bg-white/50">
+                                        <td className="p-4 text-xs">{item.tanggal}</td>
+                                        <td className="p-4 font-bold">{item.nama}</td>
+                                        <td className="p-4 text-right font-bold text-rose-600">{formatRupiah(item.jumlah)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </GlassCard>
+                </div>
+            );
+        };
+
+        const BookingWO = ({ db, currentClientId, data }) => {
+            const [f, setF] = useState({ namaWO: '', totalHarga: '', dpMasuk: '', status: 'Survey' });
+            const [edit, setEdit] = useState(!data.namaWO);
+            useEffect(() => { if (data) setF({ namaWO: data.namaWO || '', totalHarga: formatNumberInput(data.totalHarga), dpMasuk: formatNumberInput(data.dpMasuk), status: data.status || 'Survey' }); }, [data]);
+            
+            const save = async () => {
+                await window.FB.setDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'client_wo', currentClientId), { ...f, totalHarga: parseNumberInput(f.totalHarga), dpMasuk: parseNumberInput(f.dpMasuk) }, { merge: true });
+                setEdit(false);
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center"><h1 className="text-3xl font-serif font-bold text-gray-800">Wedding Organizer</h1><button onClick={() => setEdit(!edit)} className="text-pink-400">{edit ? <Icon name="X" /> : <Icon name="Edit2" />}</button></div>
+                    <GlassCard>
+                        {edit ? (
+                            <div className="space-y-4">
+                                <input type="text" placeholder="Nama WO" className="w-full p-4 rounded-xl border outline-none" value={f.namaWO} onChange={e => setF({...f, namaWO: e.target.value})} />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <input type="text" placeholder="Total Kontrak" className="w-full p-4 rounded-xl border outline-none" value={f.totalHarga} onChange={e => setF({...f, totalHarga: formatNumberInput(e.target.value)})} />
+                                    <input type="text" placeholder="DP Terbayar" className="w-full p-4 rounded-xl border outline-none" value={f.dpMasuk} onChange={e => setF({...f, dpMasuk: formatNumberInput(e.target.value)})} />
+                                </div>
+                                <select className="w-full p-4 rounded-xl border outline-none" value={f.status} onChange={e => setF({...f, status: e.target.value})}>
+                                    <option value="Survey">Survey</option><option value="Booking">Booking</option><option value="Lunas">Lunas</option>
+                                </select>
+                                <button onClick={save} className="w-full bg-pink-500 text-white p-4 rounded-xl font-bold">Simpan Data WO</button>
+                            </div>
+                        ) : (
+                            <div className="text-center md:text-left">
+                                <h2 className="text-2xl font-serif font-bold mb-4">{data.namaWO || 'Belum Ada WO'}</h2>
+                                <div className="grid grid-cols-2 gap-4 border-y border-pink-50 py-4 mb-4">
+                                    <div><p className="text-xs text-gray-400">Total</p><p className="font-bold">{formatRupiah(data.totalHarga)}</p></div>
+                                    <div><p className="text-xs text-gray-400">DP</p><p className="font-bold text-emerald-500">{formatRupiah(data.dpMasuk)}</p></div>
+                                </div>
+                                <p className="text-xs text-gray-400">Sisa Pelunasan</p>
+                                <p className="text-3xl font-bold text-rose-600">{formatRupiah(data.totalHarga - data.dpMasuk)}</p>
+                            </div>
+                        )}
+                    </GlassCard>
+                </div>
+            );
+        };
+
+        const AdminPanel = ({ allClients, db, adminData, onLogout }) => {
+            const [form, setForm] = useState({ username: '', password: '', licenseId: '', expiryDate: '', isActive: true });
+            const [adminForm, setAdminForm] = useState({ ...adminData });
+            const add = async (e) => {
+                e.preventDefault();
+                await window.FB.addDoc(window.FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), { ...form });
+                setForm({ username: '', password: '', licenseId: '', expiryDate: '', isActive: true });
+            };
+            const updateAdmin = async () => {
+                await window.FB.setDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account'), adminForm, { merge: true });
+                alert('Akses Admin Diperbarui!');
+            };
+            const toggle = async (id, current) => {
+                await window.FB.updateDoc(window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'subscriptions', id), { isActive: !current });
+            };
+            return (
+                <div className="space-y-10 max-w-5xl mx-auto pb-10">
+                    <div className="flex justify-between items-center"><h1 className="text-3xl font-serif font-bold text-gray-800">Panel Master Admin</h1><button onClick={onLogout} className="bg-rose-500 text-white px-6 py-2 rounded-xl font-bold shadow-md flex items-center gap-2"><Icon name="LogOut" /> Logout</button></div>
+                    <GlassCard>
+                        <h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="ShieldCheck" className="text-pink-500" /> Kredensial Master</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <input type="text" className="p-4 rounded-xl border outline-none" value={adminForm.username} onChange={e => setAdminForm({...adminForm, username: e.target.value})} />
+                            <input type="text" className="p-4 rounded-xl border outline-none" value={adminForm.password} onChange={e => setAdminForm({...adminForm, password: e.target.value})} />
+                            <button onClick={updateAdmin} className="md:col-span-2 bg-slate-800 text-white p-4 rounded-xl font-bold">Simpan Kredensial Baru</button>
+                        </div>
+                    </GlassCard>
+                    <GlassCard>
+                        <h3 className="font-bold mb-4 flex items-center gap-2"><Icon name="UserPlus" className="text-pink-500" /> Tambah Pembeli Baru</h3>
+                        <form onSubmit={add} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <input type="text" placeholder="Username" className="p-4 rounded-xl border outline-none" value={form.username} onChange={e => setForm({...form, username: e.target.value})} required />
+                            <input type="text" placeholder="Password" className="p-4 rounded-xl border outline-none" value={form.password} onChange={e => setForm({...form, password: e.target.value})} required />
+                            <input type="text" placeholder="License ID" className="p-4 rounded-xl border outline-none" value={form.licenseId} onChange={e => setForm({...form, licenseId: e.target.value})} required />
+                            <input type="date" className="p-4 rounded-xl border outline-none" value={form.expiryDate} onChange={e => setForm({...form, expiryDate: e.target.value})} required />
+                            <button className="md:col-span-2 bg-rose-400 text-white p-4 rounded-xl font-bold uppercase">Daftarkan & Aktifkan</button>
+                        </form>
+                    </GlassCard>
+                    <GlassCard className="p-0 overflow-hidden shadow-xl border-pink-100">
+                        <div className="p-6 bg-pink-50 border-b border-pink-100 flex justify-between items-center"><h3 className="font-serif font-bold text-rose-900 text-lg">Daftar Pelanggan Aktif</h3><span className="text-xs bg-white px-3 py-1 rounded-full font-bold text-pink-600 border border-pink-200">{allClients.length} User</span></div>
+                        <table className="w-full text-left">
+                            <thead className="bg-pink-100/50 text-xs font-bold uppercase tracking-widest text-stone-500"><tr><th className="p-5">Informasi</th><th className="p-5">Expiry</th><th className="p-5 text-right">Aksi</th></tr></thead>
+                            <tbody>
+                                {allClients.map(c => (
+                                    <tr key={c.id} className="border-t hover:bg-white/50">
+                                        <td className="p-5 font-bold">{c.username}<br/><span className="text-[10px] text-pink-400 font-mono tracking-tighter uppercase font-bold">ID: {c.licenseId}</span></td>
+                                        <td className="p-5 text-xs">{c.expiryDate}</td>
+                                        <td className="p-5 text-right"><button onClick={() => toggle(c.id, c.isActive)} className={`p-3 rounded-xl border transition-all ${c.isActive ? 'text-green-500 bg-green-50' : 'text-red-500 bg-red-50'}`}><Icon name="Power" size={18}/></button></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </GlassCard>
+                </div>
+            );
+        };
+
+        const PengaturanAkun = ({ db, loginUsername, setLoginUsername, onLogout }) => {
+            const [f, setF] = useState({ username: loginUsername, password: '' });
+            const [msg, setMsg] = useState('');
+            const save = async () => {
+                const q = window.FB.query(window.FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), window.FB.where("username", "==", loginUsername));
+                const snap = await window.FB.getDocs(q);
+                if (!snap.empty) {
+                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'subscriptions', snap.docs[0].id);
+                    await window.FB.updateDoc(docRef, { username: f.username, password: f.password || snap.docs[0].data().password });
+                    setLoginUsername(f.username);
+                    setMsg('Akses Diperbarui!');
+                    setTimeout(() => setMsg(''), 5000);
+                }
+            };
+            return (
+                <div className="max-w-md mx-auto space-y-8 animate-in fade-in py-10">
+                    <div className="text-center space-y-2"><div className="bg-white/80 w-20 h-20 rounded-full flex items-center justify-center mx-auto text-pink-500 shadow-md border border-pink-100"><Icon name="UserCircle" size={48}/></div><h1 className="text-2xl font-serif font-bold text-gray-800">Akun Saya</h1></div>
+                    <GlassCard className="space-y-4">
+                        <input type="text" value={f.username} onChange={e => setF({...f, username: e.target.value})} className="w-full p-4 rounded-xl border outline-none" placeholder="Username" />
+                        <input type="password" value={f.password} onChange={e => setF({...f, password: e.target.value})} className="w-full p-4 rounded-xl border outline-none tracking-widest" placeholder="Password Baru (Kosongkan jika tak diubah)" />
+                        {msg && <p className="text-green-500 text-center text-xs font-bold">{msg}</p>}
+                        <button onClick={save} className="w-full bg-pink-500 text-white p-4 rounded-xl font-bold shadow-lg">Simpan Perubahan</button>
+                        <button onClick={onLogout} className="w-full bg-gray-100 text-red-500 p-4 rounded-xl font-bold border border-red-50 mt-4 flex items-center justify-center gap-2"><Icon name="LogOut" /> Logout</button>
+                    </GlassCard>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // APLIKASI UTAMA (ROOT)
+        // ==========================================
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [isAuthReady, setIsAuthReady] = useState(false);
+            const [activeMenu, setActiveMenu] = useState('dashboard');
+            const [isLocked, setIsLocked] = useState(true);
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [currentClientId, setCurrentClientId] = useState(null);
+            
+            const [masterAdminData, setMasterAdminData] = useState({ username: INITIAL_ADMIN_USER, password: INITIAL_ADMIN_PASS });
+            const [loginUsername, setLoginUsername] = useState('');
+            const [loginPassword, setLoginPassword] = useState('');
+            const [loginError, setLoginError] = useState('');
+
+            const [appSettings, setAppSettings] = useState({ namaPasangan: '', rencanaAnggaran: 0 });
+            const [seserahan, setSeserahan] = useState([]);
+            const [tabungan, setTabungan] = useState([]);
+            const [woData, setWoData] = useState({ namaWO: '', totalHarga: 0, dpMasuk: 0, status: 'Survey' });
+            const [allClients, setAllClients] = useState([]);
+
+            const { FB } = window;
+            const app = FB.initializeApp(firebaseConfig);
+            const auth = FB.getAuth(app);
+            const db = FB.getFirestore(app);
+
+            useEffect(() => {
+                const unsub = FB.onAuthStateChanged(auth, (u) => { setUser(u); setIsAuthReady(true); });
+                FB.signInAnonymously(auth).catch(console.error);
+                return unsub;
+            }, []);
+
+            useEffect(() => {
+                if (!user || !isAuthReady) return;
+                const adminRef = FB.doc(db, 'artifacts', appId, 'public', 'data', 'admin_config', 'master_account');
+                return FB.onSnapshot(adminRef, (d) => d.exists() && setMasterAdminData(d.data()));
+            }, [user, isAuthReady]);
+
+            useEffect(() => {
+                if (!user || !isAdmin || !isAuthReady) return;
+                const clientsRef = FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions');
+                return FB.onSnapshot(clientsRef, (s) => setAllClients(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+            }, [user, isAdmin, isAuthReady]);
+
+            useEffect(() => {
+                if (!user || !currentClientId || isAdmin || !isAuthReady) return;
+                const path = (coll) => FB.collection(db, 'artifacts', appId, 'public', 'data', `${coll}_${currentClientId}`);
+                const docPath = (coll) => FB.doc(db, 'artifacts', appId, 'public', 'data', coll, currentClientId);
+
+                const unsubS = FB.onSnapshot(docPath('client_settings'), (d) => d.exists() && setAppSettings(d.data()));
+                const unsubW = FB.onSnapshot(docPath('client_wo'), (d) => d.exists() && setWoData(d.data()));
+                const unsubSes = FB.onSnapshot(path('seserahan'), (s) => setSeserahan(s.docs.map(d => ({id: d.id, ...d.data()}))));
+                const unsubTab = FB.onSnapshot(path('tabungan'), (s) => setTabungan(s.docs.map(d => ({id: d.id, ...d.data()}))));
+                
+                return () => { unsubS(); unsubW(); unsubSes(); unsubTab(); };
+            }, [user, currentClientId, isAdmin, isAuthReady]);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoginError('');
+                if (loginUsername === masterAdminData.username && loginPassword === masterAdminData.password) {
+                    setIsAdmin(true); setIsLocked(false); setActiveMenu('admin_panel');
+                    return;
+                }
+                try {
+                    const q = FB.query(FB.collection(db, 'artifacts', appId, 'public', 'data', 'subscriptions'), FB.where("username", "==", loginUsername), FB.where("password", "==", loginPassword));
+                    const snap = await FB.getDocs(q);
+                    if (!snap.empty) {
+                        const data = snap.docs[0].data();
+                        if (!data.isActive || new Date() > new Date(data.expiryDate)) {
+                            setLoginError('Akun tidak aktif atau masa berlaku habis.');
+                            return;
+                        }
+                        setCurrentClientId(data.licenseId); setIsAdmin(false); setIsLocked(false); setActiveMenu('dashboard');
+                    } else { setLoginError('Username atau Password salah.'); }
+                } catch (err) { setLoginError('Terjadi kesalahan koneksi sistem.'); }
+            };
+
+            const handleLogout = () => { setIsLocked(true); setIsAdmin(false); setCurrentClientId(null); setLoginUsername(''); setLoginPassword(''); };
+
+            if (!isAuthReady || !user) return <div className="h-screen flex items-center justify-center font-bold text-pink-400 animate-pulse tracking-widest uppercase">Memuat Sistem...</div>;
+
+            if (isLocked) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-4">
+                        <GlassCard className="w-full max-w-md shadow-2xl text-center p-10">
+                            <div className="bg-pink-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-pink-600 shadow-inner"><Icon name="Lock" size={40} /></div>
+                            <h1 className="text-3xl font-serif font-bold text-gray-800 mb-8 tracking-widest uppercase">Wedding Access</h1>
+                            <form onSubmit={handleLogin} className="space-y-4">
+                                <input type="text" placeholder="Username" className="w-full p-4 rounded-2xl border outline-none text-center shadow-sm" value={loginUsername} onChange={e => setLoginUsername(e.target.value)} required />
+                                <input type="password" placeholder="Password" className="w-full p-4 rounded-2xl border outline-none text-center tracking-widest shadow-sm" value={loginPassword} onChange={e => setLoginPassword(e.target.value)} required />
+                                {loginError && <p className="text-rose-600 text-xs font-bold animate-bounce">{loginError}</p>}
+                                <button className="w-full bg-pink-500 text-white p-4 rounded-2xl font-bold shadow-lg transition-all active:scale-95">Masuk Sekarang</button>
+                            </form>
+                        </GlassCard>
+                    </div>
+                );
+            }
+
+            const totalTabungan = tabungan.reduce((sum, item) => sum + Number(item.jumlah || 0), 0);
+            const totalSeserahan = seserahan.reduce((sum, item) => sum + Number(item.harga || 0), 0);
+            const totalWO = Number(woData.totalHarga || 0);
+            const dpWO = Number(woData.dpMasuk || 0);
+
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row">
+                    <aside className="hidden md:flex flex-col w-72 bg-white border-r border-pink-100 p-6 h-screen sticky top-0 shadow-lg z-20">
+                        <h2 className="text-2xl font-serif font-bold text-pink-600 mb-10 text-center uppercase tracking-tighter">Wedding Planner</h2>
+                        <nav className="flex-1 space-y-2">
+                            {(isAdmin ? [{ id: 'admin_panel', icon: 'ShieldCheck', label: 'Master Admin' }] : [
+                                { id: 'dashboard', icon: 'LayoutDashboard', label: 'Dashboard' },
+                                { id: 'seserahan', icon: 'Gift', label: 'Seserahan' },
+                                { id: 'tabungan', icon: 'PiggyBank', label: 'Tabungan' },
+                                { id: 'wo', icon: 'CalendarHeart', label: 'Vendor WO' },
+                                { id: 'pengaturan', icon: 'UserCircle', label: 'Akun & Keamanan' }
+                            ]).map(item => (
+                                <button key={item.id} onClick={() => setActiveMenu(item.id)} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${activeMenu === item.id ? 'bg-pink-100 text-pink-600 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}>
+                                    <Icon name={item.icon} /> {item.label}
+                                </button>
+                            ))}
+                        </nav>
+                        <button onClick={handleLogout} className="flex items-center justify-center gap-2 p-4 text-red-500 font-bold hover:bg-red-50 rounded-2xl transition-all"><Icon name="LogOut" /> Logout</button>
+                    </aside>
+                    <main className="flex-1 p-6 md:p-10 custom-scrollbar overflow-y-auto">
+                        <div className="max-w-5xl mx-auto">
+                            {activeMenu === 'dashboard' && <Dashboard stats={{totalTabungan, rencanaAnggaran: appSettings.rencanaAnggaran, totalSeserahan, totalWO, dpWO}} name={appSettings.namaPasangan} currentClientId={currentClientId} db={db} />}
+                            {activeMenu === 'admin_panel' && <AdminPanel allClients={allClients} db={db} adminData={masterAdminData} onLogout={handleLogout} />}
+                            {activeMenu === 'seserahan' && <Seserahan db={db} currentClientId={currentClientId} data={seserahan} />}
+                            {activeMenu === 'tabungan' && <Tabungan db={db} currentClientId={currentClientId} data={tabungan} target={appSettings.rencanaAnggaran} />}
+                            {activeMenu === 'wo' && <BookingWO db={db} currentClientId={currentClientId} data={woData} />}
+                            {activeMenu === 'pengaturan' && <PengaturanAkun db={db} loginUsername={loginUsername} setLoginUsername={setLoginUsername} onLogout={handleLogout} />}
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
