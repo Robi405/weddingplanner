@@ -109,6 +109,10 @@
                     <button onclick="switchTab('dashboard')" class="nav-btn client-only flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-rose-900 bg-rose-100">
                         <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Dashboard
                     </button>
+                    <!-- Tambahan Menu Dokumen Nikah -->
+                    <button onclick="switchTab('dokumen')" class="nav-btn client-only flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-gray-600 hover:bg-rose-50 hover:text-rose-800">
+                        <i data-lucide="file-check" class="w-5 h-5"></i> Dokumen Nikah
+                    </button>
                     <button onclick="switchTab('seserahan')" class="nav-btn client-only flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-gray-600 hover:bg-rose-50 hover:text-rose-800">
                         <i data-lucide="gift" class="w-5 h-5"></i> List Seserahan
                     </button>
@@ -302,6 +306,46 @@
                                 <p class="text-xs font-medium text-rose-700 mb-1">Sisa Pelunasan</p>
                                 <h3 class="text-xl font-bold text-rose-600" id="dash-sisa-wo">Rp 0</h3>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 1.5. DOKUMEN PERSYARATAN NIKAH -->
+            <section id="tab-dokumen" class="tab-content hidden fade-in">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <div>
+                        <h1 class="font-serif text-3xl font-bold text-rose-900">Persyaratan Dokumen</h1>
+                        <p class="text-gray-500 mt-1">Ceklis dokumen nikah yang sudah dipersiapkan.</p>
+                    </div>
+                    <div class="bg-rose-100 text-rose-800 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 border border-rose-200 shadow-sm">
+                        <i data-lucide="check-circle-2" class="w-4 h-4"></i> <span id="dokumenProgressText">0 / 10 Selesai</span>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="w-full bg-white rounded-full h-3 mb-6 overflow-hidden border border-rose-100 shadow-inner">
+                    <div id="dokumenProgressBar" class="bg-gradient-to-r from-rose-400 to-rose-500 h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Kategori 1 -->
+                    <div class="bg-white p-6 rounded-3xl shadow-sm border border-rose-100">
+                        <h3 class="font-bold text-rose-900 text-lg mb-4 flex items-center gap-2 border-b border-rose-50 pb-3">
+                            <i data-lucide="user-check" class="w-5 h-5 text-rose-500"></i> Dokumen Utama (Pribadi)
+                        </h3>
+                        <div class="space-y-2" id="listDokumenUtama">
+                            <!-- Checkboxes injected via JS -->
+                        </div>
+                    </div>
+
+                    <!-- Kategori 2 -->
+                    <div class="bg-white p-6 rounded-3xl shadow-sm border border-rose-100">
+                        <h3 class="font-bold text-rose-900 text-lg mb-4 flex items-center gap-2 border-b border-rose-50 pb-3">
+                            <i data-lucide="building" class="w-5 h-5 text-rose-500"></i> Pengantar & Administrasi
+                        </h3>
+                        <div class="space-y-2" id="listDokumenAdmin">
+                            <!-- Checkboxes injected via JS -->
                         </div>
                     </div>
                 </div>
@@ -832,8 +876,11 @@
             const checked = savedData.length;
             const progress = (checked / total) * 100;
             
-            document.getElementById('dokumenProgressText').innerText = `${checked} / ${total} Selesai`;
-            document.getElementById('dokumenProgressBar').style.width = `${progress}%`;
+            const progressText = document.getElementById('dokumenProgressText');
+            const progressBar = document.getElementById('dokumenProgressBar');
+            
+            if(progressText) progressText.innerText = `${checked} / ${total} Selesai`;
+            if(progressBar) progressBar.style.width = `${progress}%`;
         }
 
         const logout = () => {
@@ -859,7 +906,7 @@
             // Tutup menu otomatis di layar HP setelah memilih tab
             if(window.innerWidth < 768) {
                 const navMenu = document.getElementById('navMenu');
-                if(!navMenu.classList.contains('hidden')) {
+                if(navMenu && !navMenu.classList.contains('hidden')) {
                     navMenu.classList.add('hidden');
                     navMenu.classList.remove('flex');
                 }
@@ -867,14 +914,18 @@
         }
 
         // --- TAMBAHAN FUNGSI MENU MOBILE (GARIS TIGA) ---
-        document.getElementById('mobileMenuBtn').addEventListener('click', () => {
-            const navMenu = document.getElementById('navMenu');
-            navMenu.classList.toggle('hidden');
-            navMenu.classList.toggle('flex');
-        });
+        const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+        if(mobileMenuBtn) {
+            mobileMenuBtn.addEventListener('click', () => {
+                const navMenu = document.getElementById('navMenu');
+                navMenu.classList.toggle('hidden');
+                navMenu.classList.toggle('flex');
+            });
+        }
 
         const toggleModal = (modalId) => {
             const modal = document.getElementById(modalId);
+            if(!modal) return;
             if(modal.classList.contains('hidden')) { modal.classList.replace('hidden', 'flex'); } 
             else { 
                 modal.classList.replace('flex', 'hidden'); 
@@ -918,10 +969,15 @@
                     globalSettings = result.data.settings || {}; // Simpan pengaturan saat admin login
                     
                     // Isi form sosmed Admin
-                    document.getElementById('setWa').value = globalSettings.wa || '';
-                    document.getElementById('setIg').value = globalSettings.ig || '';
-                    document.getElementById('setTiktok').value = globalSettings.tiktok || '';
-                    document.getElementById('setWeb').value = globalSettings.website || '';
+                    const setWa = document.getElementById('setWa');
+                    const setIg = document.getElementById('setIg');
+                    const setTiktok = document.getElementById('setTiktok');
+                    const setWeb = document.getElementById('setWeb');
+                    
+                    if(setWa) setWa.value = globalSettings.wa || '';
+                    if(setIg) setIg.value = globalSettings.ig || '';
+                    if(setTiktok) setTiktok.value = globalSettings.tiktok || '';
+                    if(setWeb) setWeb.value = globalSettings.website || '';
 
                     renderAdminTable();
                 }
@@ -1001,25 +1057,33 @@
             
             if (db.rencanaAnggaran > 0 && totalPengeluaran > db.rencanaAnggaran) {
                 // Munculkan div peringatan merah di dashboard
-                warningDiv.classList.remove('hidden');
-                document.getElementById('dash-warning-text').innerText = `Total pengeluaran (${formatRp(totalPengeluaran)}) telah melebihi batas anggaran yang direncanakan (${formatRp(db.rencanaAnggaran)}).`;
+                if(warningDiv) warningDiv.classList.remove('hidden');
+                const warningText = document.getElementById('dash-warning-text');
+                if(warningText) warningText.innerText = `Total pengeluaran (${formatRp(totalPengeluaran)}) telah melebihi batas anggaran yang direncanakan (${formatRp(db.rencanaAnggaran)}).`;
                 // Munculkan toast pop-up notifikasi
                 setTimeout(() => showToast('Peringatan: Total pengeluaran melebihi Rencana Anggaran!', true), 1000);
             } else {
                 // Sembunyikan jika aman
-                warningDiv.classList.add('hidden');
+                if(warningDiv) warningDiv.classList.add('hidden');
             }
 
             // Progress Bar & Sisa
             const persenTabungan = db.rencanaAnggaran > 0 ? Math.min(100, Math.round((db.totalTabungan / db.rencanaAnggaran) * 100)) : 0;
-            document.getElementById('dash-progress-percent').innerText = persenTabungan + '%';
-            document.getElementById('dash-progress-bar').style.width = persenTabungan + '%';
+            const progressPercent = document.getElementById('dash-progress-percent');
+            const progressBar = document.getElementById('dash-progress-bar');
+            
+            if(progressPercent) progressPercent.innerText = persenTabungan + '%';
+            if(progressBar) progressBar.style.width = persenTabungan + '%';
             
             const sisaTabungan = Math.abs(db.rencanaAnggaran - db.totalTabungan);
-            document.getElementById('dash-progress-sisa').innerText = formatRp(sisaTabungan);
-            document.getElementById('dash-progress-sisa-text').innerText = formatTerbilang(sisaTabungan);
+            const progressSisa = document.getElementById('dash-progress-sisa');
+            const progressSisaText = document.getElementById('dash-progress-sisa-text');
+            
+            if(progressSisa) progressSisa.innerText = formatRp(sisaTabungan);
+            if(progressSisaText) progressSisaText.innerText = formatTerbilang(sisaTabungan);
 
-            document.getElementById('dash-sisa-wo').innerText = formatRp(Math.max(0, db.totalWO - db.dpWO));
+            const sisaWO = document.getElementById('dash-sisa-wo');
+            if(sisaWO) sisaWO.innerText = formatRp(Math.max(0, db.totalWO - db.dpWO));
 
             // Chart Update
             const ctx = document.getElementById('budgetChart').getContext('2d');
@@ -1041,38 +1105,44 @@
             // --- RENDER SOCIAL MEDIA LINKS DI FOOTER KLIEN ---
             const socialContainer = document.getElementById('socialLinksContainer');
             const footer = document.getElementById('clientFooter');
-            socialContainer.innerHTML = '';
-            let hasLinks = false;
+            if(socialContainer) {
+                socialContainer.innerHTML = '';
+                let hasLinks = false;
 
-            if (globalSettings.wa) {
-                socialContainer.innerHTML += `<a href="https://wa.me/${globalSettings.wa}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-colors text-xs font-bold shadow-sm border border-green-100"><i data-lucide="phone" class="w-4 h-4"></i> WhatsApp</a>`;
-                hasLinks = true;
-            }
-            if (globalSettings.ig) {
-                socialContainer.innerHTML += `<a href="https://instagram.com/${globalSettings.ig}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-pink-50 text-pink-600 rounded-full hover:bg-pink-100 transition-colors text-xs font-bold shadow-sm border border-pink-100"><i data-lucide="instagram" class="w-4 h-4"></i> Instagram</a>`;
-                hasLinks = true;
-            }
-            if (globalSettings.tiktok) {
-                socialContainer.innerHTML += `<a href="https://tiktok.com/@${globalSettings.tiktok}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-gray-50 text-gray-700 rounded-full hover:bg-gray-100 transition-colors text-xs font-bold shadow-sm border border-gray-200"><i data-lucide="music-2" class="w-4 h-4"></i> TikTok</a>`;
-                hasLinks = true;
-            }
-            if (globalSettings.website) {
-                socialContainer.innerHTML += `<a href="${globalSettings.website}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors text-xs font-bold shadow-sm border border-blue-100"><i data-lucide="globe" class="w-4 h-4"></i> Website</a>`;
-                hasLinks = true;
-            }
-            
-            if (hasLinks && currentRole !== 'admin') {
-                footer.classList.remove('hidden');
-                footer.classList.add('flex');
-            } else {
-                footer.classList.add('hidden');
-                footer.classList.remove('flex');
+                if (globalSettings.wa) {
+                    socialContainer.innerHTML += `<a href="https://wa.me/${globalSettings.wa}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-colors text-xs font-bold shadow-sm border border-green-100"><i data-lucide="phone" class="w-4 h-4"></i> WhatsApp</a>`;
+                    hasLinks = true;
+                }
+                if (globalSettings.ig) {
+                    socialContainer.innerHTML += `<a href="https://instagram.com/${globalSettings.ig}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-pink-50 text-pink-600 rounded-full hover:bg-pink-100 transition-colors text-xs font-bold shadow-sm border border-pink-100"><i data-lucide="instagram" class="w-4 h-4"></i> Instagram</a>`;
+                    hasLinks = true;
+                }
+                if (globalSettings.tiktok) {
+                    socialContainer.innerHTML += `<a href="https://tiktok.com/@${globalSettings.tiktok}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-gray-50 text-gray-700 rounded-full hover:bg-gray-100 transition-colors text-xs font-bold shadow-sm border border-gray-200"><i data-lucide="music-2" class="w-4 h-4"></i> TikTok</a>`;
+                    hasLinks = true;
+                }
+                if (globalSettings.website) {
+                    socialContainer.innerHTML += `<a href="${globalSettings.website}" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors text-xs font-bold shadow-sm border border-blue-100"><i data-lucide="globe" class="w-4 h-4"></i> Website</a>`;
+                    hasLinks = true;
+                }
+                
+                if (footer) {
+                    if (hasLinks && currentRole !== 'admin') {
+                        footer.classList.remove('hidden');
+                        footer.classList.add('flex');
+                    } else {
+                        footer.classList.add('hidden');
+                        footer.classList.remove('flex');
+                    }
+                }
             }
             lucide.createIcons(); // render ulang ikon baru
         }
 
         const renderSeserahanTable = () => {
-            const tSR = document.getElementById('table-seserahan'); tSR.innerHTML = '';
+            const tSR = document.getElementById('table-seserahan'); 
+            if(!tSR) return;
+            tSR.innerHTML = '';
             globalSeserahanData.forEach(i => {
                 const linkHtml = i['Link Checkout'] ? `<a href="${i['Link Checkout']}" target="_blank" class="text-blue-500 hover:text-blue-700 underline flex items-center gap-1 w-max"><i data-lucide="external-link" class="w-3 h-3"></i> Buka</a>` : '<span class="text-gray-400">-</span>';
                 tSR.innerHTML += `<tr><td class="p-4">${i['Nama Kebutuhan']}</td><td class="p-4">${i.Kategori}</td><td class="p-4">${linkHtml}</td><td class="p-4">${formatRp(i.Harga)}</td><td class="p-4 text-center">${i.Status}</td><td class="p-4 text-center"><button onclick="editRecord('seserahan', '${i.ID}')"><i data-lucide="edit" class="w-4 h-4 text-blue-500"></i></button></td></tr>`;
@@ -1080,12 +1150,16 @@
             lucide.createIcons();
         }
         const renderTabunganTable = () => {
-            const tTB = document.getElementById('table-tabungan'); tTB.innerHTML = '';
+            const tTB = document.getElementById('table-tabungan'); 
+            if(!tTB) return;
+            tTB.innerHTML = '';
             globalTabunganData.forEach(i => tTB.innerHTML += `<tr><td class="p-4">${formatDate(i.Tanggal)}</td><td class="p-4">${i.Nama}</td><td class="p-4 text-right">${formatRp(i.Jumlah)}</td><td class="p-4 text-center"><button onclick="editRecord('tabungan', '${i.ID}')"><i data-lucide="edit" class="w-4 h-4 text-blue-500"></i></button></td></tr>`);
             lucide.createIcons();
         }
         const renderWOTable = () => {
-            const tWO = document.getElementById('table-wo'); tWO.innerHTML = '';
+            const tWO = document.getElementById('table-wo'); 
+            if(!tWO) return;
+            tWO.innerHTML = '';
             globalWoData.forEach(i => tWO.innerHTML += `<tr><td class="p-4">${i['Nama WO']}</td><td class="p-4 text-right">${formatRp(i['Total Harga'])}</td><td class="p-4 text-right">${formatRp(i.DP)}</td><td class="p-4 text-center">${i.Status}</td><td class="p-4 text-center"><button onclick="editRecord('wo', '${i.ID}')"><i data-lucide="edit" class="w-4 h-4 text-blue-500"></i></button></td></tr>`);
             lucide.createIcons();
         }
@@ -1140,32 +1214,38 @@
         }
 
         // ACTION KHUSUS ADMIN
-        document.getElementById('formTambahKlien').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const data = {
-                namaKlien: document.getElementById('klienNama').value,
-                newUsername: document.getElementById('klienUser').value,
-                newPassword: document.getElementById('klienPass').value,
-                tglMulai: document.getElementById('klienMulai').value,
-                tglAkhir: document.getElementById('klienAkhir').value,
-                anggaran: document.getElementById('klienAnggaran').value.replace(/\./g, '')
-            };
-            submitData('create_client', data, 'modalAdminTambahKlien');
-        });
+        const formTambahKlien = document.getElementById('formTambahKlien');
+        if(formTambahKlien) {
+            formTambahKlien.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const data = {
+                    namaKlien: document.getElementById('klienNama').value,
+                    newUsername: document.getElementById('klienUser').value,
+                    newPassword: document.getElementById('klienPass').value,
+                    tglMulai: document.getElementById('klienMulai').value,
+                    tglAkhir: document.getElementById('klienAkhir').value,
+                    anggaran: document.getElementById('klienAnggaran').value.replace(/\./g, '')
+                };
+                submitData('create_client', data, 'modalAdminTambahKlien');
+            });
+        }
 
         // ACTION KHUSUS ADMIN - SIMPAN SETTINGS SOSMED
-        document.getElementById('formAppSettings').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const data = {
-                settings: {
-                    wa: document.getElementById('setWa').value,
-                    ig: document.getElementById('setIg').value,
-                    tiktok: document.getElementById('setTiktok').value,
-                    website: document.getElementById('setWeb').value
-                }
-            };
-            submitData('save_settings', data, null);
-        });
+        const formAppSettings = document.getElementById('formAppSettings');
+        if(formAppSettings) {
+            formAppSettings.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const data = {
+                    settings: {
+                        wa: document.getElementById('setWa').value,
+                        ig: document.getElementById('setIg').value,
+                        tiktok: document.getElementById('setTiktok').value,
+                        website: document.getElementById('setWeb').value
+                    }
+                };
+                submitData('save_settings', data, null);
+            });
+        }
 
         const hapusKlien = (username) => {
             if(confirm(`Yakin ingin MENGHAPUS akun klien "${username}"?`)) {
@@ -1180,71 +1260,92 @@
             toggleModal('modalPerpanjangKlien');
         }
 
-        document.getElementById('formPerpanjangKlien').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const data = {
-                extendUsername: document.getElementById('perpanjangUsername').value,
-                newEndDate: document.getElementById('perpanjangTglAkhir').value
-            };
-            submitData('extend_subscription', data, 'modalPerpanjangKlien');
-        });
+        const formPerpanjangKlien = document.getElementById('formPerpanjangKlien');
+        if(formPerpanjangKlien) {
+            formPerpanjangKlien.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const data = {
+                    extendUsername: document.getElementById('perpanjangUsername').value,
+                    newEndDate: document.getElementById('perpanjangTglAkhir').value
+                };
+                submitData('extend_subscription', data, 'modalPerpanjangKlien');
+            });
+        }
 
         // ACTION KHUSUS KLIEN
-        document.getElementById('formSeserahan').addEventListener('submit', (e) => {
-            e.preventDefault();
-            submitData(document.getElementById('srId').value ? 'edit_seserahan' : 'save_seserahan', {
-                id: document.getElementById('srId').value, nama: document.getElementById('srNama').value,
-                kategori: document.getElementById('srKategori').value, harga: document.getElementById('srHarga').value.replace(/\./g, ''),
-                link: document.getElementById('srLink').value, status: document.getElementById('srStatus').value
-            }, 'modalSeserahan');
-        });
-        document.getElementById('formTabungan').addEventListener('submit', (e) => {
-            e.preventDefault();
-            submitData(document.getElementById('tbId').value ? 'edit_tabungan' : 'save_tabungan', {
-                id: document.getElementById('tbId').value, tanggal: document.getElementById('tbTanggal').value,
-                nama: document.getElementById('tbNama').value, jumlah: document.getElementById('tbJumlah').value.replace(/\./g, '')
-            }, 'modalTabungan');
-        });
-        document.getElementById('formWO').addEventListener('submit', (e) => {
-            e.preventDefault();
-            submitData(document.getElementById('woId').value ? 'edit_wo' : 'save_wo', {
-                id: document.getElementById('woId').value, nama_wo: document.getElementById('woNama').value,
-                total_harga: document.getElementById('woTotal').value.replace(/\./g, ''), dp: document.getElementById('woDP').value.replace(/\./g, ''),
-                status: document.getElementById('woStatus').value
-            }, 'modalWO');
-        });
-        document.getElementById('formAnggaran').addEventListener('submit', (e) => {
-            e.preventDefault(); submitData('update_anggaran', { anggaran: document.getElementById('agTotal').value.replace(/\./g, '') }, 'modalAnggaran');
-        });
+        const formSeserahan = document.getElementById('formSeserahan');
+        if(formSeserahan) {
+            formSeserahan.addEventListener('submit', (e) => {
+                e.preventDefault();
+                submitData(document.getElementById('srId').value ? 'edit_seserahan' : 'save_seserahan', {
+                    id: document.getElementById('srId').value, nama: document.getElementById('srNama').value,
+                    kategori: document.getElementById('srKategori').value, harga: document.getElementById('srHarga').value.replace(/\./g, ''),
+                    link: document.getElementById('srLink').value, status: document.getElementById('srStatus').value
+                }, 'modalSeserahan');
+            });
+        }
+        
+        const formTabungan = document.getElementById('formTabungan');
+        if(formTabungan) {
+            formTabungan.addEventListener('submit', (e) => {
+                e.preventDefault();
+                submitData(document.getElementById('tbId').value ? 'edit_tabungan' : 'save_tabungan', {
+                    id: document.getElementById('tbId').value, tanggal: document.getElementById('tbTanggal').value,
+                    nama: document.getElementById('tbNama').value, jumlah: document.getElementById('tbJumlah').value.replace(/\./g, '')
+                }, 'modalTabungan');
+            });
+        }
+        
+        const formWO = document.getElementById('formWO');
+        if(formWO) {
+            formWO.addEventListener('submit', (e) => {
+                e.preventDefault();
+                submitData(document.getElementById('woId').value ? 'edit_wo' : 'save_wo', {
+                    id: document.getElementById('woId').value, nama_wo: document.getElementById('woNama').value,
+                    total_harga: document.getElementById('woTotal').value.replace(/\./g, ''), dp: document.getElementById('woDP').value.replace(/\./g, ''),
+                    status: document.getElementById('woStatus').value
+                }, 'modalWO');
+            });
+        }
+        
+        const formAnggaran = document.getElementById('formAnggaran');
+        if(formAnggaran) {
+            formAnggaran.addEventListener('submit', (e) => {
+                e.preventDefault(); submitData('update_anggaran', { anggaran: document.getElementById('agTotal').value.replace(/\./g, '') }, 'modalAnggaran');
+            });
+        }
         const saveAppTitle = (newTitle) => { submitData('update_title', { title: newTitle }, null); }
         
-        document.getElementById('formGantiPassword').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const newU = document.getElementById('newUser').value;
-            const newP = document.getElementById('newPass').value;
-            
-            showToast('Menyimpan perubahan...');
-            try {
-                const res = await fetch(GAS_URL, { 
-                    method: 'POST', 
-                    body: JSON.stringify({ 
-                        action: 'update_credentials', 
-                        data: { oldUsername: currentUser, newUsername: newU, newPassword: newP } 
-                    }) 
-                });
-                const result = await res.json();
-                if(result.status === 'success') {
-                    showToast('Akun berhasil diubah! Silakan login kembali.');
-                    setTimeout(() => {
-                        logout(); // Otomatis keluar setelah berhasil
-                    }, 1500); // Jeda 1.5 detik agar notifikasi terbaca
-                } else { 
-                    showToast(result.message, true); 
+        const formGantiPassword = document.getElementById('formGantiPassword');
+        if(formGantiPassword) {
+            formGantiPassword.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const newU = document.getElementById('newUser').value;
+                const newP = document.getElementById('newPass').value;
+                
+                showToast('Menyimpan perubahan...');
+                try {
+                    const res = await fetch(GAS_URL, { 
+                        method: 'POST', 
+                        body: JSON.stringify({ 
+                            action: 'update_credentials', 
+                            data: { oldUsername: currentUser, newUsername: newU, newPassword: newP } 
+                        }) 
+                    });
+                    const result = await res.json();
+                    if(result.status === 'success') {
+                        showToast('Akun berhasil diubah! Silakan login kembali.');
+                        setTimeout(() => {
+                            logout(); // Otomatis keluar setelah berhasil
+                        }, 1500); // Jeda 1.5 detik agar notifikasi terbaca
+                    } else { 
+                        showToast(result.message, true); 
+                    }
+                } catch(err) { 
+                    showToast('Terjadi kesalahan jaringan.', true); 
                 }
-            } catch(err) { 
-                showToast('Terjadi kesalahan jaringan.', true); 
-            }
-        });
+            });
+        }
         
         const openModalAnggaran = () => {
             const currentNumber = document.getElementById('dash-anggaran').innerText.replace(/[^0-9]/g, '');
